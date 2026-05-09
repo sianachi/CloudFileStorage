@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ApiRequestError, apiJson } from '../api/client'
+import { ApiRequestError, apiJson, onUnauthorized } from '../api/client'
 
 const STORAGE_KEY = 'cloud_file_storage_auth_token'
 
@@ -34,7 +34,11 @@ type AuthContextValue = {
   status: AuthStatus
   token: string | null
   username: string | null
-  login: (username: string, password: string) => Promise<void>
+  login: (
+    username: string,
+    password: string,
+    remember?: boolean,
+  ) => Promise<void>
   register: (
     username: string,
     password: string,
@@ -45,20 +49,30 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+// `remember` chooses persistence scope: localStorage survives browser
+// restarts, sessionStorage clears when the last tab closes. We always
+// write to one and clear the other so a stale token can't linger.
 function readStoredToken(): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY)
+    return (
+      localStorage.getItem(STORAGE_KEY) ??
+      sessionStorage.getItem(STORAGE_KEY)
+    )
   } catch {
     return null
   }
 }
 
-function persistToken(token: string | null): void {
+function persistToken(token: string | null, remember: boolean = true): void {
   try {
     if (token) {
-      localStorage.setItem(STORAGE_KEY, token)
+      const target = remember ? localStorage : sessionStorage
+      const other = remember ? sessionStorage : localStorage
+      target.setItem(STORAGE_KEY, token)
+      other.removeItem(STORAGE_KEY)
     } else {
       localStorage.removeItem(STORAGE_KEY)
+      sessionStorage.removeItem(STORAGE_KEY)
     }
   } catch {
     /* ignore quota / private mode */
@@ -102,22 +116,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })()
   }, [refreshUser])
 
-  const login = useCallback(async (user: string, password: string) => {
-    const res = await apiJson<LoginResponse>('/auth/login', {
-      method: 'POST',
-      body: { username: user, password },
-    })
-    if (!res.success || !res.access_token) {
-      throw new ApiRequestError(
-        res.message || 'Login failed',
-        401,
-        res,
-      )
-    }
-    persistToken(res.access_token)
-    setToken(res.access_token)
-    await refreshUser(res.access_token)
-  }, [refreshUser])
+  const login = useCallback(
+    async (user: string, password: string, remember: boolean = true) => {
+      const res = await apiJson<LoginResponse>('/auth/login', {
+        method: 'POST',
+        body: { username: user, password },
+      })
+      if (!res.success || !res.access_token) {
+        throw new ApiRequestError(res.message || 'Login failed', 401, res)
+      }
+      persistToken(res.access_token, remember)
+      setToken(res.access_token)
+      await refreshUser(res.access_token)
+    },
+    [refreshUser],
+  )
 
   const register = useCallback(
     async (user: string, password: string, email: string) => {
@@ -125,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: 'POST',
         body: { username: user, password, email },
       })
-      await login(user, password)
+      await login(user, password, true)
     },
     [login],
   )
@@ -146,6 +159,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null)
     setUsername(null)
     setStatus('anonymous')
+  }, [])
+
+  // Any token-bearing API call that returns 401 means our session is stale
+  // (token expired or revoked). Drop the session locally so ProtectedRoute
+  // bounces the user to /login instead of leaving them on a broken page.
+  useEffect(() => {
+    return onUnauthorized(() => {
+      persistToken(null)
+      setToken(null)
+      setUsername(null)
+      setStatus('anonymous')
+    })
   }, [])
 
   const value = useMemo<AuthContextValue>(
