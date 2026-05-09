@@ -1,0 +1,141 @@
+import os
+import base64
+import binascii
+import hashlib
+import hmac
+import json
+from datetime import datetime, timedelta, timezone
+
+import bcrypt
+
+from const import Constants
+from dto.dto import LoginUserRequest, RegisterUserRequest
+from models.auth.user import User
+from services.sqlite_service import SQLiteService
+
+
+class AuthManagement(SQLiteService):
+    def __init__(self, physical_path: str = None):
+        base_path = physical_path or ""
+        super().__init__(os.path.join(base_path, Constants.USERS_TABLE_NAME))
+        self.TABLE_NAME = Constants.USERS_TABLE_NAME
+        self._token_secret = os.getenv("AUTH_TOKEN_SECRET", "dev-token-secret")
+        self._token_ttl_minutes = int(os.getenv("AUTH_TOKEN_TTL_MINUTES", "30"))
+        self._revoked_tokens: set[str] = set()
+
+    async def initalizeDatabase(self, physical_path: str = None):
+        base_path = physical_path or ""
+        self._db_path = os.path.join(base_path, Constants.USERS_TABLE_NAME)
+        await self.ensure_table(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                email TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """
+        )
+
+    async def login(self, request: LoginUserRequest):
+        user = await self.get_user(request.username)
+        if user is None:
+            return {"message": "User not found"}
+
+        if not bcrypt.checkpw(request.password.encode("utf-8"), user.password_hash.encode("utf-8")):
+            return {"message": "Invalid password"}
+
+        token = self._create_token(user.username)
+        return {"message": "Login successful", "access_token": token, "token_type": "bearer"}
+
+    async def register(self, request: RegisterUserRequest):
+        existing_user = await self.get_user(request.username)
+        if existing_user is not None:
+            return {"message": "User already exists"}
+
+        password_hash = bcrypt.hashpw(
+            request.password.encode("utf-8"),
+            bcrypt.gensalt(),
+        ).decode("utf-8")
+        now = datetime.utcnow().isoformat()
+
+        async with self._connect() as db:
+            await db.execute(
+                f"INSERT INTO {self.TABLE_NAME} (username, password_hash, email, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (request.username, password_hash, request.email, now, now),
+            )
+            await db.commit()
+        return {"message": "User registered successfully", "username": request.username}
+
+    async def get_user(self, username: str) -> User | None:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} WHERE username = ?",
+                (username,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return User(
+                id=row["id"],
+                username=row["username"],
+                password_hash=row["password_hash"],
+                email=row["email"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+
+
+    def logout(self, token: str):
+        self._revoked_tokens.add(token)
+        return {"message": "Logout successful"}
+
+    def verify_token(self, token: str):
+        if token in self._revoked_tokens:
+            return {"valid": False, "message": "Token has been revoked"}
+
+        payload = self._decode_token(token)
+        if payload is None:
+            return {"valid": False, "message": "Invalid token"}
+
+        if payload["exp"] < int(datetime.now(timezone.utc).timestamp()):
+            return {"valid": False, "message": "Token has expired"}
+
+        return {"valid": True, "username": payload["sub"]}
+
+    def _create_token(self, username: str) -> str:
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=self._token_ttl_minutes)
+        payload = {
+            "sub": username,
+            "exp": int(expires_at.timestamp()),
+        }
+        payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("utf-8")
+        signature = hmac.new(
+            self._token_secret.encode("utf-8"),
+            payload_b64.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return f"{payload_b64}.{signature}"
+
+    def _decode_token(self, token: str) -> dict | None:
+        try:
+            payload_b64, signature = token.split(".", maxsplit=1)
+            expected_signature = hmac.new(
+                self._token_secret.encode("utf-8"),
+                payload_b64.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected_signature):
+                return None
+
+            padded_payload = payload_b64 + "=" * (-len(payload_b64) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded_payload.encode("utf-8")).decode("utf-8"))
+            if "sub" not in payload or "exp" not in payload:
+                return None
+            return payload
+        except (ValueError, json.JSONDecodeError, binascii.Error):
+            return None
