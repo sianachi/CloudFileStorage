@@ -95,6 +95,45 @@ export function IconFolderSmall({ className }: IconProps) {
   )
 }
 
+export function IconPencil({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M15.232 5.232l3.536 3.536M9 11l-3 9 9-3 9.586-9.586a2 2 0 00-2.828-2.828L9 11z"
+      />
+    </svg>
+  )
+}
+
+export function IconUpload({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0-12l-4 4m4-4l4 4"
+      />
+    </svg>
+  )
+}
+
+export function IconFolderPlus({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2zM12 11v6m-3-3h6"
+      />
+    </svg>
+  )
+}
+
 export function IconPlusColored({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden>

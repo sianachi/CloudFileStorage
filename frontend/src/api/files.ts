@@ -21,6 +21,18 @@ export async function createFolder(path: string, token: string): Promise<FileEnt
   })
 }
 
+export async function renameEntry(
+  path: string,
+  newName: string,
+  token: string,
+): Promise<FileEntry> {
+  return apiJson<FileEntry>(`/files?path=${encodeURIComponent(path)}`, {
+    method: 'PATCH',
+    body: { new_name: newName },
+    token,
+  })
+}
+
 export async function deleteEntry(path: string, token: string): Promise<void> {
   await apiJson<{ success: boolean }>(
     `/files?path=${encodeURIComponent(path)}`,
