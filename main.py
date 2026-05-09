@@ -2,6 +2,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from endpoints.auth import router as auth_router
 from services.auth.auth_management import AuthManagement
@@ -30,11 +31,25 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "")
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 def create_app() -> FastAPI:
     application = FastAPI(
         title="Cloud File Storage",
         lifespan=lifespan,
     )
+    origins = _cors_origins()
+    if origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     application.include_router(auth_router)
     return application
 

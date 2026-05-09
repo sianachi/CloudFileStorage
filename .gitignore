@@ -108,3 +108,5 @@ coverage/
 # Misc frontend
 .eslintcache
 *.tsbuildinfo
+
+virtual-files/
