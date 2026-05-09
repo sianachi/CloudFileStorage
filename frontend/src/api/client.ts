@@ -2,6 +2,29 @@ import { apiUrl } from './baseUrl'
 
 export type ApiErrorBody = { detail?: string | unknown }
 
+type UnauthorizedListener = () => void
+const unauthorizedListeners = new Set<UnauthorizedListener>()
+
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener)
+  return () => unauthorizedListeners.delete(listener)
+}
+
+export function notifyUnauthorized(): void {
+  for (const l of unauthorizedListeners) {
+    try {
+      l()
+    } catch {
+      /* swallow listener errors so one bad subscriber can't block others */
+    }
+  }
+}
+
+type FastApiValidationItem = {
+  loc?: unknown
+  msg?: unknown
+}
+
 export class ApiRequestError extends Error {
   readonly status: number
   readonly body: unknown
@@ -12,6 +35,33 @@ export class ApiRequestError extends Error {
     this.status = status
     this.body = body
   }
+}
+
+function formatValidationItem(item: FastApiValidationItem): string | null {
+  const msg = typeof item.msg === 'string' ? item.msg : null
+  if (!msg) return null
+  if (Array.isArray(item.loc) && item.loc.length > 0) {
+    const field = item.loc[item.loc.length - 1]
+    if (typeof field === 'string' && field !== 'body') {
+      return `${field}: ${msg}`
+    }
+  }
+  return msg
+}
+
+function extractErrorMessage(parsed: unknown, fallback: string): string {
+  if (!parsed || typeof parsed !== 'object' || !('detail' in parsed)) {
+    return fallback
+  }
+  const detail = (parsed as ApiErrorBody).detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => formatValidationItem(item as FastApiValidationItem))
+      .filter((m): m is string => m !== null)
+    if (messages.length > 0) return messages.join('; ')
+  }
+  return fallback
 }
 
 export async function apiJson<T>(
@@ -48,18 +98,14 @@ export async function apiJson<T>(
   }
 
   if (!res.ok) {
-    const detail =
-      parsed &&
-      typeof parsed === 'object' &&
-      'detail' in parsed &&
-      typeof (parsed as ApiErrorBody).detail === 'string'
-        ? (parsed as ApiErrorBody).detail
-        : res.statusText
-    throw new ApiRequestError(
-      typeof detail === 'string' ? detail : res.statusText,
-      res.status,
-      parsed,
-    )
+    if (res.status === 401 && token) {
+      // Token-bearing call returned 401 → auth is stale; let listeners
+      // (AuthContext) clear the session so the user gets bounced to /login
+      // instead of a portal full of silent failures.
+      notifyUnauthorized()
+    }
+    const message = extractErrorMessage(parsed, res.statusText)
+    throw new ApiRequestError(message, res.status, parsed)
   }
 
   return parsed as T
