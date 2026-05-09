@@ -1,10 +1,48 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from const import Constants
+from services.auth.password_policy import validate_password
+
+
+class FileEntry(BaseModel):
+    name: str
+    path: str
+    size: int
+    is_directory: bool
+    last_updated: str
+
+
+class ListResponse(BaseModel):
+    path: str
+    entries: list[FileEntry]
+
+
+class CreateFolderRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+
+
+class QuotaResponse(BaseModel):
+    bytes_used: int
+    bytes_limit: int | None = None
+
+
+class DeleteResponse(BaseModel):
+    success: bool
+    message: str
 
 
 class RegisterUserRequest(BaseModel):
     username: str = Field(..., min_length=1)
-    password: str = Field(..., min_length=1)
-    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=1, max_length=Constants.MAX_PASSWORD_BYTES)
+    email: EmailStr
+
+    @field_validator("password")
+    @classmethod
+    def _enforce_password_policy(cls, value: str) -> str:
+        failures = validate_password(value)
+        if failures:
+            raise ValueError("; ".join(failures))
+        return value
 
 
 class LoginUserRequest(BaseModel):

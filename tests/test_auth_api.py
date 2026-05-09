@@ -2,6 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+VALID_PASSWORD = "validPass1234"
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
@@ -15,7 +18,7 @@ def client(monkeypatch, tmp_path):
 def test_register_then_duplicate(client: TestClient):
     body = {
         "username": "alice",
-        "password": "secret123",
+        "password": VALID_PASSWORD,
         "email": "alice@example.com",
     }
     r = client.post("/auth/register", json=body)
@@ -33,7 +36,7 @@ def test_login_invalid_credentials(client: TestClient):
         "/auth/register",
         json={
             "username": "bob",
-            "password": "pw",
+            "password": VALID_PASSWORD,
             "email": "bob@example.com",
         },
     )
@@ -57,13 +60,13 @@ def test_login_me_logout(client: TestClient):
         "/auth/register",
         json={
             "username": "carol",
-            "password": "secret123",
+            "password": VALID_PASSWORD,
             "email": "carol@example.com",
         },
     )
     login_r = client.post(
         "/auth/login",
-        json={"username": "carol", "password": "secret123"},
+        json={"username": "carol", "password": VALID_PASSWORD},
     )
     assert login_r.status_code == 200
     token = login_r.json()["access_token"]
@@ -78,3 +81,74 @@ def test_login_me_logout(client: TestClient):
 
     me_after = client.get("/auth/me", headers=headers)
     assert me_after.status_code == 401
+
+
+def test_register_rejects_short_password(client: TestClient):
+    r = client.post(
+        "/auth/register",
+        json={
+            "username": "dave",
+            "password": "short1",
+            "email": "dave@example.com",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_register_rejects_password_without_digit(client: TestClient):
+    r = client.post(
+        "/auth/register",
+        json={
+            "username": "eve",
+            "password": "noDigitsAtAllHere",
+            "email": "eve@example.com",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_register_accepts_password_at_min_length(client: TestClient):
+    r = client.post(
+        "/auth/register",
+        json={
+            "username": "frank",
+            "password": "abcdefghijk1",  # exactly 12 chars, has digit
+            "email": "frank@example.com",
+        },
+    )
+    assert r.status_code == 200
+
+
+def test_register_rejects_oversized_password(client: TestClient):
+    r = client.post(
+        "/auth/register",
+        json={
+            "username": "grace",
+            "password": "a" * 72 + "1",  # 73 bytes
+            "email": "grace@example.com",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_register_rejects_invalid_email(client: TestClient):
+    r = client.post(
+        "/auth/register",
+        json={
+            "username": "heidi",
+            "password": VALID_PASSWORD,
+            "email": "not-an-email",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_login_does_not_enforce_password_policy(client: TestClient):
+    # A short password sent to /auth/login must NOT 422 — login should
+    # only ever fail with 401 so existing accounts don't get locked out
+    # if the policy ever tightens further.
+    r = client.post(
+        "/auth/login",
+        json={"username": "ivan", "password": "x"},
+    )
+    assert r.status_code == 401

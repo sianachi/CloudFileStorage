@@ -1,8 +1,10 @@
 fastapi
 pydantic>=2
+email-validator
 uvicorn[standard]
 aiosqlite
 bcrypt
+python-multipart
 
 pytest
 pytest-asyncio
