@@ -32,6 +32,9 @@ class Filesystem:
     async def list_children(self, owner_id: int, parent_path: str):
         return await self._processor.list_children(owner_id, parent_path)
 
+    async def rename(self, owner_id: int, old_path: str, new_name: str):
+        return await self._processor.rename(owner_id, old_path, new_name)
+
     async def bytes_used(self, owner_id: int) -> int:
         return await self._processor.bytes_used(owner_id)
 

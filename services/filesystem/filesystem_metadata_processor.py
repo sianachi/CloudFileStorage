@@ -160,6 +160,75 @@ class FilesystemMetadataProcessor(SQLiteService):
             )
             await db.commit()
 
+    async def rename(
+        self, owner_id: int, old_path: str, new_name: str
+    ) -> File | None:
+        """Rename an entry within its current folder. Folder renames cascade
+        to every descendant in a single transaction."""
+        old_normalized = normalize_path(old_path)
+        if old_normalized == "/":
+            raise ValueError("cannot rename root")
+        if not new_name or "/" in new_name or new_name in (".", "..") or "\x00" in new_name:
+            raise ValueError("invalid name")
+
+        existing = await self.get_file(owner_id, old_normalized)
+        if existing is None:
+            return None
+
+        parent = parent_of(old_normalized)
+        new_normalized = (
+            "/" + new_name if parent in ("", "/") else f"{parent}/{new_name}"
+        )
+
+        if new_normalized == old_normalized:
+            return existing
+
+        collision = await self.get_file(owner_id, new_normalized)
+        if collision is not None:
+            raise FileExistsError(new_normalized)
+
+        old_prefix_len = len(old_normalized)
+        async with self._connect() as db:
+            if existing.is_directory:
+                # Update self.
+                await db.execute(
+                    f"UPDATE {self.TABLE_NAME} SET path = ?, name = ? "
+                    "WHERE owner_id = ? AND path = ?",
+                    (new_normalized, new_name, owner_id, old_normalized),
+                )
+                # Update every descendant: substitute the old prefix with
+                # the new one in both `path` and `parent_path`. SUBSTR is
+                # 1-indexed, so we skip past `old_prefix_len` characters.
+                await db.execute(
+                    f"UPDATE {self.TABLE_NAME} SET "
+                    "path = ? || SUBSTR(path, ?), "
+                    "parent_path = ? || SUBSTR(parent_path, ?) "
+                    "WHERE owner_id = ? AND path LIKE ?",
+                    (
+                        new_normalized,
+                        old_prefix_len + 1,
+                        new_normalized,
+                        old_prefix_len + 1,
+                        owner_id,
+                        old_normalized + "/%",
+                    ),
+                )
+            else:
+                await db.execute(
+                    f"UPDATE {self.TABLE_NAME} SET path = ?, name = ? "
+                    "WHERE owner_id = ? AND path = ?",
+                    (new_normalized, new_name, owner_id, old_normalized),
+                )
+            await db.commit()
+
+        old_disk = self._disk_path(owner_id, old_normalized)
+        new_disk = self._disk_path(owner_id, new_normalized)
+        if os.path.exists(old_disk):
+            os.makedirs(os.path.dirname(new_disk), exist_ok=True)
+            os.rename(old_disk, new_disk)
+
+        return await self.get_file(owner_id, new_normalized)
+
     async def list_children(self, owner_id: int, parent_path: str) -> list[File]:
         """Direct children of parent_path for owner — folders first, then files, both alphabetical."""
         normalized = normalize_path(parent_path)

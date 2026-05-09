@@ -12,6 +12,7 @@ from dto.dto import (
     FileEntry,
     ListResponse,
     QuotaResponse,
+    RenameRequest,
 )
 from models.auth.user import User
 from models.file import File as FileModel
@@ -134,6 +135,28 @@ async def download_file(
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(target.name)}"
         },
     )
+
+
+@router.patch("/files", response_model=FileEntry)
+async def rename_entry(
+    body: RenameRequest,
+    path: str = Query(...),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> FileEntry:
+    normalized = _safe_user_path(path)
+    new_name = body.new_name.strip()
+    if not new_name or "/" in new_name or new_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="invalid name")
+    try:
+        result = await filesystem.rename(user.id, normalized, new_name)
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="a file or folder already exists with that name")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if result is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return _to_entry(result)
 
 
 @router.delete("/files", response_model=DeleteResponse)

@@ -21,6 +21,10 @@ class CreateFolderRequest(BaseModel):
     path: str = Field(..., min_length=1)
 
 
+class RenameRequest(BaseModel):
+    new_name: str = Field(..., min_length=1)
+
+
 class QuotaResponse(BaseModel):
     bytes_used: int
     bytes_limit: int | None = None

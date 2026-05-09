@@ -164,6 +164,109 @@ def test_path_traversal_rejected(client: TestClient):
     assert r.status_code == 400
 
 
+def test_rename_file(client: TestClient):
+    token = _register_and_login(client, "iris")
+    headers = {"Authorization": f"Bearer {token}"}
+    client.post(
+        "/files",
+        params={"parent": "/"},
+        headers=headers,
+        files={"upload": ("old.txt", io.BytesIO(b"data"), "text/plain")},
+    )
+    r = client.patch(
+        "/files",
+        params={"path": "/old.txt"},
+        headers=headers,
+        json={"new_name": "renamed.txt"},
+    )
+    assert r.status_code == 200, r.text
+    entry = r.json()
+    assert entry["name"] == "renamed.txt"
+    assert entry["path"] == "/renamed.txt"
+
+    # Old path is gone, new path serves the same bytes
+    assert client.get("/files/download", params={"path": "/old.txt"}, headers=headers).status_code == 404
+    dl = client.get("/files/download", params={"path": "/renamed.txt"}, headers=headers)
+    assert dl.status_code == 200
+    assert dl.content == b"data"
+
+
+def test_rename_folder_cascades(client: TestClient):
+    token = _register_and_login(client, "judy")
+    headers = {"Authorization": f"Bearer {token}"}
+    client.post("/folders", json={"path": "/Work"}, headers=headers)
+    client.post("/folders", json={"path": "/Work/Reports"}, headers=headers)
+    client.post(
+        "/files",
+        params={"parent": "/Work/Reports"},
+        headers=headers,
+        files={"upload": ("memo.txt", io.BytesIO(b"hello"), "text/plain")},
+    )
+
+    r = client.patch(
+        "/files",
+        params={"path": "/Work"},
+        headers=headers,
+        json={"new_name": "Job"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["path"] == "/Job"
+
+    # Listing under the old name is gone; new name has the moved subtree
+    listing = client.get("/files", headers=headers).json()
+    names = [e["name"] for e in listing["entries"]]
+    assert names == ["Job"]
+
+    nested = client.get("/files", params={"path": "/Job/Reports"}, headers=headers).json()
+    assert [e["name"] for e in nested["entries"]] == ["memo.txt"]
+
+    dl = client.get("/files/download", params={"path": "/Job/Reports/memo.txt"}, headers=headers)
+    assert dl.status_code == 200
+    assert dl.content == b"hello"
+
+
+def test_rename_collision_returns_409(client: TestClient):
+    token = _register_and_login(client, "kim")
+    headers = {"Authorization": f"Bearer {token}"}
+    client.post(
+        "/files",
+        params={"parent": "/"},
+        headers=headers,
+        files={"upload": ("a.txt", io.BytesIO(b"1"), "text/plain")},
+    )
+    client.post(
+        "/files",
+        params={"parent": "/"},
+        headers=headers,
+        files={"upload": ("b.txt", io.BytesIO(b"2"), "text/plain")},
+    )
+    r = client.patch(
+        "/files",
+        params={"path": "/a.txt"},
+        headers=headers,
+        json={"new_name": "b.txt"},
+    )
+    assert r.status_code == 409
+
+
+def test_rename_rejects_slash_in_name(client: TestClient):
+    token = _register_and_login(client, "leo")
+    headers = {"Authorization": f"Bearer {token}"}
+    client.post(
+        "/files",
+        params={"parent": "/"},
+        headers=headers,
+        files={"upload": ("a.txt", io.BytesIO(b"1"), "text/plain")},
+    )
+    r = client.patch(
+        "/files",
+        params={"path": "/a.txt"},
+        headers=headers,
+        json={"new_name": "subdir/evil.txt"},
+    )
+    assert r.status_code == 400
+
+
 def test_delete_folder_cascades(client: TestClient):
     token = _register_and_login(client, "heidi")
     headers = {"Authorization": f"Bearer {token}"}
