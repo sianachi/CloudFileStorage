@@ -1,16 +1,42 @@
-from services.filesystem import Filesystem
-from models.file import File
-from datetime import datetime
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
+from endpoints.auth import router as auth_router
+from services.auth.auth_management import AuthManagement
+from services.filesystem import Filesystem
 
-working_directory_path = os.path.join(os.getcwd(), 'virtual-files')
-app = FastAPI()
 
-def __main__():
-      filesystem = Filesystem(working_directory_path)
+def _storage_root() -> str:
+    return os.getenv("STORAGE_ROOT", os.path.join(os.getcwd(), "virtual-files"))
 
-# Main logic - Init filesystem here with real path
 
-__main__()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    root = _storage_root()
+    os.makedirs(root, exist_ok=True)
+
+    filesystem = Filesystem(root)
+    await filesystem.initialize()
+
+    auth_management = AuthManagement(root)
+    await auth_management.initalizeDatabase(root)
+
+    app.state.storage_root = root
+    app.state.filesystem = filesystem
+    app.state.auth_management = auth_management
+
+    yield
+
+
+def create_app() -> FastAPI:
+    application = FastAPI(
+        title="Cloud File Storage",
+        lifespan=lifespan,
+    )
+    application.include_router(auth_router)
+    return application
+
+
+app = create_app()

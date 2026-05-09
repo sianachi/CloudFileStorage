@@ -6,6 +6,13 @@ from models.file import File
 from services.sqlite_service import SQLiteService
 
 
+def _dt_to_sql(value: datetime | str) -> str:
+    """Store datetimes as ISO text so SQLite does not use deprecated datetime adapters."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
 class FilesystemMetadataProcessor(SQLiteService):
     def __init__(self, physical_path: str = None):
         base_path = physical_path or ""
@@ -45,9 +52,9 @@ class FilesystemMetadataProcessor(SQLiteService):
                     file.name,
                     file.path,
                     file.size,
-                    file.creation_date,
-                    file.last_updated,
-                    file.is_directory,
+                    _dt_to_sql(file.creation_date),
+                    _dt_to_sql(file.last_updated),
+                    int(file.is_directory),
                 ),
             )
             await db.commit()
@@ -101,9 +108,9 @@ class FilesystemMetadataProcessor(SQLiteService):
                 (
                     file.name,
                     file.size,
-                    file.creation_date,
-                    file.last_updated,
-                    file.is_directory,
+                    _dt_to_sql(file.creation_date),
+                    _dt_to_sql(file.last_updated),
+                    int(file.is_directory),
                     file.path,
                 ),
             )

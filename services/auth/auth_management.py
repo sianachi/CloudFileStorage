@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import base64
 import binascii
 import hashlib
@@ -9,7 +10,14 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 
 from const import Constants
-from dto.dto import LoginUserRequest, RegisterUserRequest
+from dto.dto import (
+    LoginResponse,
+    LoginUserRequest,
+    LogoutResponse,
+    RegisterResponse,
+    RegisterUserRequest,
+    TokenVerificationResult,
+)
 from models.auth.user import User
 from services.sqlite_service import SQLiteService
 
@@ -39,36 +47,48 @@ class AuthManagement(SQLiteService):
         """
         )
 
-    async def login(self, request: LoginUserRequest):
+    async def login(self, request: LoginUserRequest) -> LoginResponse:
         user = await self.get_user(request.username)
         if user is None:
-            return {"message": "User not found"}
+            return LoginResponse(success=False, message="User not found")
 
         if not bcrypt.checkpw(request.password.encode("utf-8"), user.password_hash.encode("utf-8")):
-            return {"message": "Invalid password"}
+            return LoginResponse(success=False, message="Invalid password")
 
         token = self._create_token(user.username)
-        return {"message": "Login successful", "access_token": token, "token_type": "bearer"}
+        return LoginResponse(
+            success=True,
+            message="Login successful",
+            access_token=token,
+            token_type="bearer",
+        )
 
-    async def register(self, request: RegisterUserRequest):
+    async def register(self, request: RegisterUserRequest) -> RegisterResponse:
         existing_user = await self.get_user(request.username)
         if existing_user is not None:
-            return {"message": "User already exists"}
+            return RegisterResponse(success=False, message="User already exists")
 
         password_hash = bcrypt.hashpw(
             request.password.encode("utf-8"),
             bcrypt.gensalt(),
         ).decode("utf-8")
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
-        async with self._connect() as db:
-            await db.execute(
-                f"INSERT INTO {self.TABLE_NAME} (username, password_hash, email, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (request.username, password_hash, request.email, now, now),
-            )
-            await db.commit()
-        return {"message": "User registered successfully", "username": request.username}
+        try:
+            async with self._connect() as db:
+                await db.execute(
+                    f"INSERT INTO {self.TABLE_NAME} (username, password_hash, email, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (request.username, password_hash, request.email, now, now),
+                )
+                await db.commit()
+        except sqlite3.IntegrityError:
+            return RegisterResponse(success=False, message="User already exists")
+        return RegisterResponse(
+            success=True,
+            message="User registered successfully",
+            username=request.username,
+        )
 
     async def get_user(self, username: str) -> User | None:
         async with self._connect() as db:
@@ -89,22 +109,22 @@ class AuthManagement(SQLiteService):
             )
 
 
-    def logout(self, token: str):
+    def logout(self, token: str) -> LogoutResponse:
         self._revoked_tokens.add(token)
-        return {"message": "Logout successful"}
+        return LogoutResponse(success=True, message="Logout successful")
 
-    def verify_token(self, token: str):
+    def verify_token(self, token: str) -> TokenVerificationResult:
         if token in self._revoked_tokens:
-            return {"valid": False, "message": "Token has been revoked"}
+            return TokenVerificationResult(valid=False, message="Token has been revoked")
 
         payload = self._decode_token(token)
         if payload is None:
-            return {"valid": False, "message": "Invalid token"}
+            return TokenVerificationResult(valid=False, message="Invalid token")
 
         if payload["exp"] < int(datetime.now(timezone.utc).timestamp()):
-            return {"valid": False, "message": "Token has expired"}
+            return TokenVerificationResult(valid=False, message="Token has expired")
 
-        return {"valid": True, "username": payload["sub"]}
+        return TokenVerificationResult(valid=True, message=None, username=payload["sub"])
 
     def _create_token(self, username: str) -> str:
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=self._token_ttl_minutes)
