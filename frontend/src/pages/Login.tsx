@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ApiRequestError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { HeroPageShell } from '../components/HeroPageShell'
+import { PasswordField } from '../components/PasswordField'
 
 export function Login() {
   const { login } = useAuth()
@@ -10,6 +11,7 @@ export function Login() {
   const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -22,7 +24,7 @@ export function Login() {
     setError(null)
     setSubmitting(true)
     try {
-      await login(username.trim(), password)
+      await login(username.trim(), password, remember)
       navigate(from, { replace: true })
     } catch (err) {
       if (err instanceof ApiRequestError && err.status === 401) {
@@ -81,25 +83,24 @@ export function Login() {
             className="mt-1 w-full rounded-md border border-secondary bg-background/80 px-3 py-2 text-primary-text shadow-sm outline-none backdrop-blur-sm focus:border-accent focus:ring-2 focus:ring-accent/20"
           />
         </div>
-        <div>
-          <label
-            htmlFor="login-password"
-            className="block text-sm font-medium text-primary-text"
-          >
-            Password
-          </label>
+        <PasswordField
+          id="login-password"
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="current-password"
+          required
+          minLength={1}
+        />
+        <label className="flex items-center gap-2 text-sm text-primary-text">
           <input
-            id="login-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            minLength={1}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-md border border-secondary bg-background/80 px-3 py-2 text-primary-text shadow-sm outline-none backdrop-blur-sm focus:border-accent focus:ring-2 focus:ring-accent/20"
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            className="h-4 w-4 rounded border-secondary text-accent-bg focus:ring-2 focus:ring-accent/20"
           />
-        </div>
+          Remember me on this device
+        </label>
         <button
           type="submit"
           disabled={submitting}

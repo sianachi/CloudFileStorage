@@ -1,8 +1,13 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiRequestError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { HeroPageShell } from '../components/HeroPageShell'
+import { PasswordField } from '../components/PasswordField'
+import {
+  PasswordRequirements,
+  validatePasswordClient,
+} from '../components/PasswordRequirements'
 
 function formatRegisterError(err: unknown): string {
   if (err instanceof ApiRequestError) {
@@ -21,14 +26,41 @@ export function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [passwordFocused, setPasswordFocused] = useState(false)
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [confirmError, setConfirmError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  // Clear the mismatch error as soon as the two fields agree again.
+  useEffect(() => {
+    if (confirmError && password === confirmPassword) {
+      setConfirmError(null)
+    }
+  }, [password, confirmPassword, confirmError])
+
+  function handleConfirmBlur() {
+    if (confirmPassword && password !== confirmPassword) {
+      setConfirmError("Passwords don't match")
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+
+    const policyFailures = validatePasswordClient(password)
+    if (policyFailures.length > 0) {
+      setError(policyFailures.join('; '))
+      return
+    }
+    if (password !== confirmPassword) {
+      setConfirmError("Passwords don't match")
+      return
+    }
+
     setSubmitting(true)
     try {
       await register(username.trim(), password, email.trim())
@@ -104,24 +136,30 @@ export function Register() {
           />
         </div>
         <div>
-          <label
-            htmlFor="register-password"
-            className="block text-sm font-medium text-primary-text"
-          >
-            Password
-          </label>
-          <input
+          <PasswordField
             id="register-password"
-            name="password"
-            type="password"
+            label="Password"
+            value={password}
+            onChange={setPassword}
             autoComplete="new-password"
             required
-            minLength={1}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-md border border-secondary bg-background/80 px-3 py-2 text-primary-text shadow-sm outline-none backdrop-blur-sm focus:border-accent focus:ring-2 focus:ring-accent/20"
+            onFocus={() => setPasswordFocused(true)}
+            onBlur={() => setPasswordFocused(false)}
           />
+          {passwordFocused ? (
+            <PasswordRequirements password={password} />
+          ) : null}
         </div>
+        <PasswordField
+          id="register-confirm-password"
+          label="Confirm password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          autoComplete="new-password"
+          required
+          onBlur={handleConfirmBlur}
+          error={confirmError}
+        />
         <button
           type="submit"
           disabled={submitting}

@@ -18,3 +18,28 @@
     @apply bg-background text-primary-text antialiased;
   }
 }
+
+/* Scoped Drive-inspired neutrals for `/app` only — keeps marketing pages on green tokens */
+.portal-shell {
+  --portal-canvas: #fbfcf7;
+  --portal-surface: #ffffff;
+  --portal-border: #eef0e6;
+  --portal-active: #eaf0dd;
+  --portal-active-text: #3a5a40;
+  --portal-muted: #5f6368;
+  --portal-heading: #202124;
+  --portal-chip-hover: #f4f7ee;
+  --portal-folder-card: #f4f7ee;
+  --portal-shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.25);
+  --portal-shadow-md:
+    0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px rgba(60, 64, 67, 0.15);
+
+  background-image:
+    radial-gradient(60% 38% at 12% 8%, rgba(255, 255, 255, 0.92), transparent 70%),
+    radial-gradient(48% 32% at 88% 18%, rgba(255, 255, 255, 0.82), transparent 70%),
+    radial-gradient(55% 36% at 72% 92%, rgba(255, 255, 255, 0.88), transparent 70%),
+    radial-gradient(42% 28% at 22% 70%, rgba(255, 255, 255, 0.78), transparent 70%),
+    radial-gradient(80% 55% at 50% 0%, rgba(163, 177, 138, 0.14), transparent 75%),
+    radial-gradient(70% 60% at 0% 50%, rgba(163, 177, 138, 0.1), transparent 70%);
+  background-attachment: fixed;
+}

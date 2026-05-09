@@ -15,7 +15,7 @@ export function Landing() {
   }
 
   return (
-    <HeroPageShell maxWidth="2xl" contentAlign="center">
+    <HeroPageShell maxWidth="2xl" contentAlign="center" variant="spotlight">
       <p className="text-sm font-medium uppercase tracking-wide text-accent">
         Secure cloud storage
       </p>
