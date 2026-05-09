@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from dependencies import get_auth_management
+from dependencies import get_auth_management, get_current_user
 from dto.dto import (
     LoginResponse,
     LoginUserRequest,
@@ -10,6 +10,7 @@ from dto.dto import (
     RegisterResponse,
     RegisterUserRequest,
 )
+from models.auth.user import User
 from services.auth.auth_management import AuthManagement
 
 router = APIRouter(
@@ -56,16 +57,5 @@ async def logout(
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    auth: AuthManagement = Depends(get_auth_management),
-) -> MeResponse:
-    if credentials is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    result = auth.verify_token(credentials.credentials)
-    if not result.valid or result.username is None:
-        raise HTTPException(
-            status_code=401,
-            detail=result.message or "Unauthorized",
-        )
-    return MeResponse(username=result.username)
+async def me(user: User = Depends(get_current_user)) -> MeResponse:
+    return MeResponse(username=user.username)

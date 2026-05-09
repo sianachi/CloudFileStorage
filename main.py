@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from endpoints.auth import router as auth_router
+from endpoints.files import router as files_router
 from services.auth.auth_management import AuthManagement
 from services.filesystem import Filesystem
 
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
     application.include_router(auth_router)
+    application.include_router(files_router)
     return application
 
 
