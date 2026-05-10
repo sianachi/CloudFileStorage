@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { ApiRequestError, apiJson, onUnauthorized } from '../api/client'
 
-const STORAGE_KEY = 'cloud_file_storage_auth_token'
+const STORAGE_KEY = 'pithos_auth_token'
 
 type LoginResponse = {
   success: boolean

@@ -1,8 +1,19 @@
-# CloudFileStorage
+# Pithos
 
-A self-hosted personal cloud — upload, organise, view, and edit your files from a web interface, without depending on a third-party storage provider.
+Cloud storage that runs on a Raspberry Pi.
+
+*Named after the πίθος — the large clay storage jar of ancient Greece.*
 
 > **WIP** — will deploy on k3s.
+
+## Goals
+
+Pithos aims to be as lightweight as possible — comfortably runnable on a single Raspberry Pi:
+
+- One Python process, one SQLite database, file bytes on local disk.
+- No required external services — no S3, no Postgres, no Redis, no message broker.
+- Minimal dependency surface; no heavy runtimes (no JVM, no headless browser).
+- Frontend builds to static files; backend is a single ASGI app.
 
 ## Features
 

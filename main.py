@@ -39,7 +39,7 @@ def _cors_origins() -> list[str]:
 
 def create_app() -> FastAPI:
     application = FastAPI(
-        title="Cloud File Storage",
+        title="Pithos",
         lifespan=lifespan,
     )
     origins = _cors_origins()
