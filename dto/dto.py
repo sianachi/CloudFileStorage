@@ -86,3 +86,29 @@ class TokenVerificationResult(BaseModel):
 
 class MeResponse(BaseModel):
     username: str
+
+
+class ViewTokenRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+
+
+class ViewTokenResponse(BaseModel):
+    token: str
+    expires_at: str  # ISO timestamp
+
+
+class ZipEntry(BaseModel):
+    name: str  # full path within the archive, e.g. "folder/sub/file.txt"
+    is_dir: bool
+    size: int  # uncompressed bytes
+    compressed_size: int
+    modified: str  # ISO timestamp from ZipInfo.date_time
+
+
+class ZipListingResponse(BaseModel):
+    path: str  # the archive's path within the user's storage
+    entries: list[ZipEntry]
+
+
+class SaveContentRequest(BaseModel):
+    content: str
