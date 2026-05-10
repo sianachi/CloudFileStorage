@@ -36,3 +36,11 @@ export function joinPath(parent: string, name: string): string {
   if (parent === '/' || parent === '') return '/' + name
   return `${parent}/${name}`
 }
+
+/** Parent folder of a backend path: "/" → "/", "/a" → "/", "/a/b" → "/a". */
+export function parentOf(path: string): string {
+  if (!path || path === '/') return '/'
+  const idx = path.lastIndexOf('/')
+  if (idx <= 0) return '/'
+  return path.slice(0, idx)
+}

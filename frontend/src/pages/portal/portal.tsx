@@ -6,6 +6,7 @@ import { PortalHeader } from './PortalHeader'
 import { Sidebar } from './Sidebar'
 import { urlToPath } from './path'
 import { cn, focusRing } from './utils'
+import { ViewerPage } from './viewer/ViewerPage'
 
 export function Portal() {
   const params = useParams<{ '*': string }>()
@@ -73,6 +74,8 @@ export function Portal() {
           refreshKey={refreshKey}
         />
       </div>
+
+      <ViewerPage />
     </div>
   )
 }

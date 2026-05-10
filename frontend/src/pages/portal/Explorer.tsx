@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listFiles } from '../../api/files'
 import { useAuth } from '../../auth/AuthContext'
 import type { FileEntry } from '../../types/files'
@@ -29,6 +29,7 @@ export function Explorer({
 }) {
   const { token } = useAuth()
   const navigate = useNavigate()
+  const [, setSearchParams] = useSearchParams()
 
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -114,6 +115,14 @@ export function Explorer({
     [navigate],
   )
 
+  const onOpenFile = useCallback(
+    (entry: FileEntry) => {
+      if (entry.is_directory) return
+      setSearchParams({ view: entry.path })
+    },
+    [setSearchParams],
+  )
+
   return (
     <aside
       id="portal-explorer"
@@ -161,6 +170,7 @@ export function Explorer({
             currentPath={currentPath}
             onToggle={toggle}
             onSelect={onSelect}
+            onOpenFile={onOpenFile}
           />
         </ul>
       ) : null}
@@ -174,12 +184,14 @@ function ExplorerRoot({
   currentPath,
   onToggle,
   onSelect,
+  onOpenFile,
 }: {
   expanded: Set<string>
   childrenByPath: Map<string, FileEntry[]>
   currentPath: string
   onToggle: (path: string) => void
   onSelect: (entry: FileEntry) => void
+  onOpenFile: (entry: FileEntry) => void
 }) {
   const isRootActive = currentPath === '/'
   const isOpen = expanded.has(ROOT_PATH)
@@ -224,6 +236,7 @@ function ExplorerRoot({
               currentPath={currentPath}
               onToggle={onToggle}
               onSelect={onSelect}
+              onOpenFile={onOpenFile}
             />
           ))}
         </ul>
@@ -240,6 +253,7 @@ function ExplorerNode({
   currentPath,
   onToggle,
   onSelect,
+  onOpenFile,
 }: {
   entry: FileEntry
   depth: number
@@ -248,6 +262,7 @@ function ExplorerNode({
   currentPath: string
   onToggle: (path: string) => void
   onSelect: (entry: FileEntry) => void
+  onOpenFile: (entry: FileEntry) => void
 }) {
   const isFolder = entry.is_directory
   const isOpen = isFolder && expanded.has(entry.path)
@@ -263,6 +278,9 @@ function ExplorerNode({
             onToggle(entry.path)
             onSelect(entry)
           }
+        }}
+        onDoubleClick={() => {
+          if (!isFolder) onOpenFile(entry)
         }}
         className={cn(
           'flex w-full items-center gap-1.5 py-1 pr-2 text-left text-sm',
@@ -303,6 +321,7 @@ function ExplorerNode({
               currentPath={currentPath}
               onToggle={onToggle}
               onSelect={onSelect}
+              onOpenFile={onOpenFile}
             />
           ))}
         </ul>

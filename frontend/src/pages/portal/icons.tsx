@@ -121,6 +121,58 @@ export function IconUpload({ className }: IconProps) {
   )
 }
 
+export function IconDownload({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 20V8m0 12l-4-4m4 4l4-4"
+      />
+    </svg>
+  )
+}
+
+export function IconFolderUpload({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2zM12 12v5m0-5l-2 2m2-2l2 2"
+      />
+    </svg>
+  )
+}
+
+export function IconArrowUp({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 19V5M5 12l7-7 7 7"
+      />
+    </svg>
+  )
+}
+
+export function IconArrowDown({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 5v14M5 12l7 7 7-7"
+      />
+    </svg>
+  )
+}
+
 export function IconFolderPlus({ className }: IconProps) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
@@ -134,11 +186,95 @@ export function IconFolderPlus({ className }: IconProps) {
   )
 }
 
+export function IconFilePlus({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9m-6-6l6 6m-6-6v6h6M12 13v6m-3-3h6"
+      />
+    </svg>
+  )
+}
+
 export function IconPlusColored({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden>
       <circle cx="12" cy="12" r="10" fill="#4285f4" />
       <path stroke="#fff" strokeLinecap="round" strokeWidth={2} d="M12 8v8M8 12h8" />
+    </svg>
+  )
+}
+
+export function IconImage({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <rect x="3" y="5" width="18" height="14" rx="2" strokeWidth={2} />
+      <circle cx="9" cy="10" r="1.5" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 16l-5-5-8 8" />
+    </svg>
+  )
+}
+
+export function IconPdf({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6zM14 3v6h6M8 13h8M8 17h6"
+      />
+    </svg>
+  )
+}
+
+export function IconVideo({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <rect x="3" y="5" width="18" height="14" rx="2" strokeWidth={2} />
+      <path d="M10 9l5 3-5 3z" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function IconArchive({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M3 8h18M5 8v12a1 1 0 001 1h12a1 1 0 001-1V8M3 4h18v4H3zM10 13h4"
+      />
+    </svg>
+  )
+}
+
+export function IconList({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 6h16M4 12h16M4 18h16"
+      />
+    </svg>
+  )
+}
+
+export function IconGrid({ className }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"
+      />
     </svg>
   )
 }
