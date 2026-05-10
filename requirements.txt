@@ -5,6 +5,7 @@ uvicorn[standard]
 aiosqlite
 bcrypt
 python-multipart
+stream-zip
 
 pytest
 pytest-asyncio

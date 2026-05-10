@@ -111,3 +111,5 @@ coverage/
 *.tsbuildinfo
 
 virtual-files/
+
+todo.txt
