@@ -15,7 +15,15 @@ BASELINE_VERSION = 0
 
 
 # --- users database -------------------------------------------------------
-USERS_MIGRATIONS: list[Migration] = []
+USERS_MIGRATIONS: list[Migration] = [
+    # v1: Pithos no longer collects email addresses — accounts are
+    # username + password only. Drop the column so no email data is stored.
+    Migration(
+        version=1,
+        name="drop_email",
+        statements=["ALTER TABLE users DROP COLUMN email"],
+    ),
+]
 
 
 # --- file metadata database ----------------------------------------------

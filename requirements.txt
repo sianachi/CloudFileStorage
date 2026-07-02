@@ -1,6 +1,5 @@
 fastapi
 pydantic>=2
-email-validator
 uvicorn[standard]
 aiosqlite
 bcrypt

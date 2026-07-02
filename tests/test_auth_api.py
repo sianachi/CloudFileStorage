@@ -19,7 +19,6 @@ def test_register_then_duplicate(client: TestClient):
     body = {
         "username": "alice",
         "password": VALID_PASSWORD,
-        "email": "alice@example.com",
     }
     r = client.post("/auth/register", json=body)
     assert r.status_code == 200
@@ -37,7 +36,6 @@ def test_login_invalid_credentials(client: TestClient):
         json={
             "username": "bob",
             "password": VALID_PASSWORD,
-            "email": "bob@example.com",
         },
     )
     r = client.post(
@@ -61,7 +59,6 @@ def test_login_me_logout(client: TestClient):
         json={
             "username": "carol",
             "password": VALID_PASSWORD,
-            "email": "carol@example.com",
         },
     )
     login_r = client.post(
@@ -89,7 +86,6 @@ def test_register_rejects_short_password(client: TestClient):
         json={
             "username": "dave",
             "password": "short1",
-            "email": "dave@example.com",
         },
     )
     assert r.status_code == 422
@@ -101,7 +97,6 @@ def test_register_rejects_password_without_digit(client: TestClient):
         json={
             "username": "eve",
             "password": "noDigitsAtAllHere",
-            "email": "eve@example.com",
         },
     )
     assert r.status_code == 422
@@ -113,7 +108,6 @@ def test_register_accepts_password_at_min_length(client: TestClient):
         json={
             "username": "frank",
             "password": "abcdefghijk1",  # exactly 12 chars, has digit
-            "email": "frank@example.com",
         },
     )
     assert r.status_code == 200
@@ -125,13 +119,14 @@ def test_register_rejects_oversized_password(client: TestClient):
         json={
             "username": "grace",
             "password": "a" * 72 + "1",  # 73 bytes
-            "email": "grace@example.com",
         },
     )
     assert r.status_code == 422
 
 
-def test_register_rejects_invalid_email(client: TestClient):
+def test_register_ignores_extra_email_field(client: TestClient):
+    # Email is no longer part of the model; sending one is simply ignored
+    # (pydantic drops unknown fields) rather than rejected.
     r = client.post(
         "/auth/register",
         json={
@@ -140,7 +135,7 @@ def test_register_rejects_invalid_email(client: TestClient):
             "email": "not-an-email",
         },
     )
-    assert r.status_code == 422
+    assert r.status_code == 200
 
 
 def test_login_does_not_enforce_password_policy(client: TestClient):

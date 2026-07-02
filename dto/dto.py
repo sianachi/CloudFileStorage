@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from const import Constants
 from services.auth.password_policy import validate_password
@@ -38,7 +38,6 @@ class DeleteResponse(BaseModel):
 class RegisterUserRequest(BaseModel):
     username: str = Field(..., min_length=1)
     password: str = Field(..., min_length=1, max_length=Constants.MAX_PASSWORD_BYTES)
-    email: EmailStr
 
     @field_validator("password")
     @classmethod

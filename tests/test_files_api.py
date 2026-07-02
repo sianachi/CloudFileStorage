@@ -23,7 +23,6 @@ def _register_and_login(client: TestClient, username: str) -> str:
         json={
             "username": username,
             "password": VALID_PASSWORD,
-            "email": f"{username}@example.com",
         },
     )
     r = client.post(

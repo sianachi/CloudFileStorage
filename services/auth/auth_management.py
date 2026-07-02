@@ -42,7 +42,9 @@ class AuthManagement(SQLiteService):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                email TEXT NOT NULL,
+                -- Legacy column: immediately dropped by migration v1. Kept in
+                -- the baseline so the drop migration is valid on fresh DBs too.
+                email TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -82,9 +84,9 @@ class AuthManagement(SQLiteService):
         try:
             async with self._connect() as db:
                 await db.execute(
-                    f"INSERT INTO {self.TABLE_NAME} (username, password_hash, email, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (request.username, password_hash, request.email, now, now),
+                    f"INSERT INTO {self.TABLE_NAME} (username, password_hash, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (request.username, password_hash, now, now),
                 )
                 await db.commit()
         except sqlite3.IntegrityError:
@@ -108,7 +110,6 @@ class AuthManagement(SQLiteService):
                 id=row["id"],
                 username=row["username"],
                 password_hash=row["password_hash"],
-                email=row["email"],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             )
