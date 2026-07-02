@@ -69,4 +69,32 @@ METADATA_MIGRATIONS: list[Migration] = [
             "ON file_versions (owner_id, path, version_no)",
         ],
     ),
+    # v4: sharing / permissions. A share grants a target user (or, via a
+    # public_token, anyone with the link) access to an entry — and, when the
+    # entry is a folder, to its whole subtree — with a read or write role.
+    Migration(
+        version=4,
+        name="add_shares",
+        statements=[
+            """
+            CREATE TABLE IF NOT EXISTS shares (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                entry_path TEXT NOT NULL,
+                is_directory INTEGER NOT NULL,
+                shared_with_user_id INTEGER,
+                role TEXT NOT NULL,
+                public_token TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_shares_token "
+            "ON shares (public_token)",
+            "CREATE INDEX IF NOT EXISTS idx_shares_with_user "
+            "ON shares (shared_with_user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_shares_owner "
+            "ON shares (owner_id)",
+        ],
+    ),
 ]

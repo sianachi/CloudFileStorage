@@ -6,9 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from endpoints.auth import router as auth_router
 from endpoints.files import router as files_router
+from endpoints.shares import router as shares_router
 from services.auth.auth_management import AuthManagement
 from services.auth.rate_limiter import LoginRateGuard
 from services.filesystem import Filesystem
+from services.sharing import ShareService
 
 
 def _storage_root() -> str:
@@ -30,6 +32,7 @@ async def lifespan(app: FastAPI):
     app.state.filesystem = filesystem
     app.state.auth_management = auth_management
     app.state.login_guard = LoginRateGuard.from_env()
+    app.state.share_service = ShareService(root)
 
     yield
 
@@ -55,6 +58,7 @@ def create_app() -> FastAPI:
         )
     application.include_router(auth_router)
     application.include_router(files_router)
+    application.include_router(shares_router)
     return application
 
 

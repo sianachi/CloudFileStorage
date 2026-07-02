@@ -154,6 +154,23 @@ class AuthManagement(SQLiteService):
             )
 
 
+    async def get_user_by_id(self, user_id: int) -> User | None:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} WHERE id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return User(
+                id=row["id"],
+                username=row["username"],
+                password_hash=row["password_hash"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+
     def logout(self, token: str) -> LogoutResponse:
         self._revoked_tokens.add(token)
         return LogoutResponse(success=True, message="Logout successful")

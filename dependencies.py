@@ -9,6 +9,7 @@ from models.auth.user import User
 from services.auth.auth_management import AuthManagement
 from services.auth.rate_limiter import LoginRateGuard
 from services.filesystem import Filesystem
+from services.sharing import ShareService
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -24,6 +25,10 @@ def get_auth_management(request: Request) -> AuthManagement:
 
 def get_login_guard(request: Request) -> LoginRateGuard:
     return request.app.state.login_guard
+
+
+def get_share_service(request: Request) -> ShareService:
+    return request.app.state.share_service
 
 
 def _trusted_proxies() -> set[str]:

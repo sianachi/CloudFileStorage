@@ -137,6 +137,51 @@ class SaveContentRequest(BaseModel):
     content: str
 
 
+class CreateShareRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    target_username: str | None = None
+    public: bool = False
+    role: str = Field("read", pattern="^(read|write)$")
+    expires_in_hours: int | None = Field(None, ge=1)
+
+
+class ShareInfo(BaseModel):
+    id: int
+    kind: str  # "user" | "link"
+    entry_path: str
+    is_directory: bool
+    role: str
+    target_username: str | None = None
+    public_token: str | None = None
+    created_at: str
+    expires_at: str | None = None
+
+
+class ShareListResponse(BaseModel):
+    shares: list[ShareInfo]
+
+
+class SharedWithMeEntry(BaseModel):
+    share_id: int
+    owner_username: str
+    name: str
+    entry_path: str  # path in the owner's namespace (the share root)
+    is_directory: bool
+    role: str
+    expires_at: str | None = None
+
+
+class SharedWithMeResponse(BaseModel):
+    entries: list[SharedWithMeEntry]
+
+
+class PublicShareInfo(BaseModel):
+    name: str
+    is_directory: bool
+    role: str
+    size: int
+
+
 class VersionEntry(BaseModel):
     version_no: int
     size: int
