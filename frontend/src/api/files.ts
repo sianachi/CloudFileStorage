@@ -1,6 +1,14 @@
 import { ApiRequestError, apiJson, notifyUnauthorized } from './client'
 import { apiUrl } from './baseUrl'
-import type { FileEntry, ListResponse, Quota, ZipListingResponse } from '../types/files'
+import type {
+  FileEntry,
+  ListResponse,
+  Quota,
+  SearchResponse,
+  TrashEntry,
+  VersionEntry,
+  ZipListingResponse,
+} from '../types/files'
 
 export async function listFiles(path: string, token: string): Promise<ListResponse> {
   return apiJson<ListResponse>(
@@ -59,6 +67,102 @@ export async function deleteEntry(path: string, token: string): Promise<void> {
   await apiJson<{ success: boolean }>(
     `/files?path=${encodeURIComponent(path)}`,
     { method: 'DELETE', token },
+  )
+}
+
+export async function moveEntry(
+  source: string,
+  destinationParent: string,
+  token: string,
+): Promise<FileEntry> {
+  return apiJson<FileEntry>('/files/move', {
+    method: 'POST',
+    body: { source, destination_parent: destinationParent },
+    token,
+  })
+}
+
+export async function searchFiles(query: string, token: string): Promise<SearchResponse> {
+  return apiJson<SearchResponse>(
+    `/files/search?q=${encodeURIComponent(query)}`,
+    { token },
+  )
+}
+
+export async function setFavorite(
+  path: string,
+  favorite: boolean,
+  token: string,
+): Promise<FileEntry> {
+  return apiJson<FileEntry>('/files/favorite', {
+    method: 'POST',
+    body: { path, favorite },
+    token,
+  })
+}
+
+export async function listFavorites(token: string): Promise<ListResponse> {
+  return apiJson<ListResponse>('/files/favorites', { token })
+}
+
+export async function listRecent(token: string): Promise<ListResponse> {
+  return apiJson<ListResponse>('/files/recent', { token })
+}
+
+// --- trash ---------------------------------------------------------------
+
+export async function listTrash(token: string): Promise<{ entries: TrashEntry[] }> {
+  return apiJson<{ entries: TrashEntry[] }>('/trash', { token })
+}
+
+export async function restoreFromTrash(trashPath: string, token: string): Promise<FileEntry> {
+  return apiJson<FileEntry>(
+    `/trash/restore?path=${encodeURIComponent(trashPath)}`,
+    { method: 'POST', token },
+  )
+}
+
+export async function purgeFromTrash(trashPath: string, token: string): Promise<void> {
+  await apiJson<{ success: boolean }>(
+    `/trash?path=${encodeURIComponent(trashPath)}`,
+    { method: 'DELETE', token },
+  )
+}
+
+export async function emptyTrash(token: string): Promise<number> {
+  const res = await apiJson<{ purged: number }>('/trash/all', {
+    method: 'DELETE',
+    token,
+  })
+  return res.purged
+}
+
+// --- versions ------------------------------------------------------------
+
+export async function listVersions(
+  path: string,
+  token: string,
+): Promise<{ path: string; versions: VersionEntry[] }> {
+  return apiJson<{ path: string; versions: VersionEntry[] }>(
+    `/files/versions?path=${encodeURIComponent(path)}`,
+    { token },
+  )
+}
+
+export async function restoreVersion(
+  path: string,
+  version: number,
+  token: string,
+): Promise<FileEntry> {
+  return apiJson<FileEntry>(
+    `/files/versions/restore?path=${encodeURIComponent(path)}&version=${version}`,
+    { method: 'POST', token },
+  )
+}
+
+export function versionDownloadUrl(path: string, version: number): string {
+  return apiUrl(
+    `/files/versions/download?path=${encodeURIComponent(path)}&version=${version}`,
   )
 }
 
