@@ -20,6 +20,16 @@ export function notifyUnauthorized(): void {
   }
 }
 
+// A token refresher lets a 401'd request transparently obtain a fresh access
+// token and retry once, instead of immediately bouncing the user to /login.
+// AuthContext registers one backed by the refresh-token flow.
+type TokenRefresher = () => Promise<string | null>
+let tokenRefresher: TokenRefresher | null = null
+
+export function setTokenRefresher(fn: TokenRefresher | null): void {
+  tokenRefresher = fn
+}
+
 type FastApiValidationItem = {
   loc?: unknown
   msg?: unknown
@@ -73,19 +83,33 @@ export async function apiJson<T>(
   } = {},
 ): Promise<T> {
   const { method = 'GET', body, token } = options
-  const headers: HeadersInit = {}
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json'
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+
+  const doFetch = (authToken: string | null | undefined) => {
+    const headers: HeadersInit = {}
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+    }
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`
+    }
+    return fetch(apiUrl(path), {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
   }
 
-  const res = await fetch(apiUrl(path), {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let res = await doFetch(token)
+
+  // If an authenticated call 401s, the access token likely just expired.
+  // Try a one-shot refresh and replay the request before giving up. The
+  // refresher itself makes an unauthenticated call, so it can't recurse here.
+  if (res.status === 401 && token && tokenRefresher) {
+    const newToken = await tokenRefresher()
+    if (newToken) {
+      res = await doFetch(newToken)
+    }
+  }
 
   const text = await res.text()
   let parsed: unknown = null

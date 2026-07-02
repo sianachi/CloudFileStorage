@@ -59,7 +59,12 @@ class LoginResponse(BaseModel):
     success: bool
     message: str
     access_token: str | None = None
+    refresh_token: str | None = None
     token_type: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1)
 
 
 class RegisterResponse(BaseModel):

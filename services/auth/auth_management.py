@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -31,7 +32,15 @@ class AuthManagement(SQLiteService):
         self.TABLE_NAME = Constants.USERS_TABLE_NAME
         self._token_secret = os.getenv("AUTH_TOKEN_SECRET", "dev-token-secret")
         self._token_ttl_minutes = int(os.getenv("AUTH_TOKEN_TTL_MINUTES", "30"))
+        # Refresh tokens live much longer so a session survives across many
+        # short access-token expiries without forcing a re-login. Default 7d.
+        self._refresh_ttl_minutes = int(
+            os.getenv("AUTH_REFRESH_TTL_MINUTES", str(60 * 24 * 7))
+        )
         self._revoked_tokens: set[str] = set()
+        # Rotated/consumed refresh tokens are revoked by their jti so a stolen
+        # older refresh token can't be replayed after rotation.
+        self._revoked_jti: set[str] = set()
 
     async def initalizeDatabase(self, physical_path: str = None):
         base_path = physical_path or ""
@@ -62,11 +71,41 @@ class AuthManagement(SQLiteService):
         if not bcrypt.checkpw(request.password.encode("utf-8"), user.password_hash.encode("utf-8")):
             return LoginResponse(success=False, message="Invalid password")
 
-        token = self._create_token(user.username)
         return LoginResponse(
             success=True,
             message="Login successful",
-            access_token=token,
+            access_token=self._create_token(user.username, "access"),
+            refresh_token=self._create_token(user.username, "refresh"),
+            token_type="bearer",
+        )
+
+    async def refresh(self, refresh_token: str) -> LoginResponse:
+        """Exchange a valid refresh token for a fresh access + refresh pair.
+
+        Rotates the refresh token: the presented one is revoked so it can be
+        used exactly once. If it was already used (or forged/expired), the
+        exchange fails and the client must log in again.
+        """
+        result = self.verify_token(refresh_token, expected_type="refresh")
+        if not result.valid or result.username is None:
+            return LoginResponse(
+                success=False, message=result.message or "Invalid refresh token"
+            )
+
+        # The account may have been deleted since the token was issued.
+        user = await self.get_user(result.username)
+        if user is None:
+            return LoginResponse(success=False, message="Account not found")
+
+        payload = self._decode_token(refresh_token)
+        if payload and "jti" in payload:
+            self._revoked_jti.add(payload["jti"])
+
+        return LoginResponse(
+            success=True,
+            message="Token refreshed",
+            access_token=self._create_token(user.username, "access"),
+            refresh_token=self._create_token(user.username, "refresh"),
             token_type="bearer",
         )
 
@@ -119,7 +158,9 @@ class AuthManagement(SQLiteService):
         self._revoked_tokens.add(token)
         return LogoutResponse(success=True, message="Logout successful")
 
-    def verify_token(self, token: str) -> TokenVerificationResult:
+    def verify_token(
+        self, token: str, expected_type: str = "access"
+    ) -> TokenVerificationResult:
         if token in self._revoked_tokens:
             return TokenVerificationResult(valid=False, message="Token has been revoked")
 
@@ -127,17 +168,37 @@ class AuthManagement(SQLiteService):
         if payload is None:
             return TokenVerificationResult(valid=False, message="Invalid token")
 
+        # Tokens issued before typing existed have no "typ" — treat as access
+        # so old access tokens keep working, but reject a refresh token used
+        # where an access token is required (and vice versa).
+        if payload.get("typ", "access") != expected_type:
+            return TokenVerificationResult(valid=False, message="Wrong token type")
+
+        jti = payload.get("jti")
+        if jti is not None and jti in self._revoked_jti:
+            return TokenVerificationResult(valid=False, message="Token has been revoked")
+
         if payload["exp"] < int(datetime.now(timezone.utc).timestamp()):
             return TokenVerificationResult(valid=False, message="Token has expired")
 
         return TokenVerificationResult(valid=True, message=None, username=payload["sub"])
 
-    def _create_token(self, username: str) -> str:
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=self._token_ttl_minutes)
+    def _create_token(self, username: str, token_type: str = "access") -> str:
+        ttl_minutes = (
+            self._token_ttl_minutes
+            if token_type == "access"
+            else self._refresh_ttl_minutes
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
         payload = {
             "sub": username,
             "exp": int(expires_at.timestamp()),
+            "typ": token_type,
         }
+        # A per-token id lets us revoke a specific refresh token on rotation
+        # without invalidating the whole secret.
+        if token_type == "refresh":
+            payload["jti"] = secrets.token_urlsafe(12)
         payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("utf-8")
         signature = hmac.new(

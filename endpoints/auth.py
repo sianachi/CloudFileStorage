@@ -12,6 +12,7 @@ from dto.dto import (
     LoginUserRequest,
     LogoutResponse,
     MeResponse,
+    RefreshRequest,
     RegisterResponse,
     RegisterUserRequest,
 )
@@ -74,6 +75,17 @@ async def register(
     result = await auth.register(body)
     if not result.success:
         raise HTTPException(status_code=409, detail=result.message)
+    return result
+
+
+@router.post("/refresh", response_model=LoginResponse)
+async def refresh(
+    body: RefreshRequest,
+    auth: AuthManagement = Depends(get_auth_management),
+) -> LoginResponse:
+    result = await auth.refresh(body.refresh_token)
+    if not result.success:
+        raise HTTPException(status_code=401, detail=result.message or "Invalid refresh token")
     return result
 
 
