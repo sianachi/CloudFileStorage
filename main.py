@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from endpoints.auth import router as auth_router
 from endpoints.files import router as files_router
 from services.auth.auth_management import AuthManagement
+from services.auth.rate_limiter import LoginRateGuard
 from services.filesystem import Filesystem
 
 
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
     app.state.storage_root = root
     app.state.filesystem = filesystem
     app.state.auth_management = auth_management
+    app.state.login_guard = LoginRateGuard.from_env()
 
     yield
 
