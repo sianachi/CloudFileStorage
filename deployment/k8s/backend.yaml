@@ -38,18 +38,20 @@ spec:
           envFrom:
             - configMapRef:
                 name: pithos-config
+            - secretRef:
+                name: pithos-secrets
           volumeMounts:
             - name: storage
               mountPath: /data/virtual-files
           readinessProbe:
             httpGet:
-              path: /docs
+              path: /healthz
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /docs
+              path: /healthz
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 30
