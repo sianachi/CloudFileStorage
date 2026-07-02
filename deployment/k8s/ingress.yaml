@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pithos
+  namespace: pithos
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - pithos.nwagboso.com
+      secretName: pithos-tls
+  rules:
+    - host: pithos.nwagboso.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pithos-frontend
+                port:
+                  number: 80

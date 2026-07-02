@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pithos-frontend
+  namespace: pithos
+spec:
+  selector:
+    app: pithos-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pithos-frontend
+  namespace: pithos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pithos-frontend
+  template:
+    metadata:
+      labels:
+        app: pithos-frontend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: frontend
+          image: ghcr.io/sianachi/pithos-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

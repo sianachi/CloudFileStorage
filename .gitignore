@@ -115,3 +115,9 @@ virtual-files/
 todo.txt
 
 .claude/settings.local.json
+
+# --- Kubernetes secrets ---
+deployment/k8s/secrets.yaml
+deployment/k8s/*-secrets.yaml
+!deployment/k8s/secrets.example.yaml
+!deployment/k8s/*-secrets.example.yaml

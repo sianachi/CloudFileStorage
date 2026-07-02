@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pithos-config
+  namespace: pithos
+data:
+  STORAGE_ROOT: "/data/virtual-files"
+  CORS_ORIGINS: "https://pithos.nwagboso.com"
