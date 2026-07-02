@@ -26,6 +26,22 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      '/trash': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/shares': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/public': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/healthz': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
     },
   },
 })
