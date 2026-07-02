@@ -62,45 +62,171 @@ export async function deleteEntry(path: string, token: string): Promise<void> {
   )
 }
 
+export type UploadProgress = (loaded: number, total: number) => void
+
+export type UploadOptions = {
+  overwrite?: boolean
+  onProgress?: UploadProgress
+  signal?: AbortSignal
+}
+
+// Above this size a single POST is swapped for the resumable chunked protocol
+// so a dropped connection can pick up where it left off.
+const RESUMABLE_THRESHOLD = 8 * 1024 * 1024
+const CHUNK_SIZE = 4 * 1024 * 1024
+
+function parseBody(text: string): unknown {
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+function detailOf(parsed: unknown, fallback: string): string {
+  return parsed && typeof parsed === 'object' && 'detail' in parsed
+    ? String((parsed as { detail: unknown }).detail)
+    : fallback
+}
+
+/**
+ * Upload a file. Reports progress via `opts.onProgress` and can be cancelled
+ * via `opts.signal`. Large files transparently use the resumable protocol.
+ */
 export async function uploadFile(
   parent: string,
   file: File,
   token: string,
-  opts?: { overwrite?: boolean },
+  opts?: UploadOptions,
 ): Promise<FileEntry> {
+  if (file.size > RESUMABLE_THRESHOLD) {
+    return uploadFileResumable(parent, file, token, opts)
+  }
+
+  // Single-shot upload over XMLHttpRequest — unlike fetch(), it exposes
+  // upload progress events.
+  const overwriteParam = opts?.overwrite ? '&overwrite=true' : ''
+  const url = apiUrl(`/files?parent=${encodeURIComponent(parent)}${overwriteParam}`)
   const form = new FormData()
   form.append('upload', file, file.name)
 
-  // FormData uploads bypass apiJson because we must NOT set Content-Type;
-  // the browser fills it in with the multipart boundary.
-  const overwriteParam = opts?.overwrite ? '&overwrite=true' : ''
-  const res = await fetch(
-    apiUrl(`/files?parent=${encodeURIComponent(parent)}${overwriteParam}`),
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    },
-  )
-
-  const text = await res.text()
-  let parsed: unknown = null
-  if (text) {
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      parsed = text
+  return new Promise<FileEntry>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    if (opts?.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) opts.onProgress!(e.loaded, e.total)
+      }
     }
+    xhr.onload = () => {
+      const parsed = parseBody(xhr.responseText)
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsed as FileEntry)
+        return
+      }
+      if (xhr.status === 401) notifyUnauthorized()
+      reject(new ApiRequestError(detailOf(parsed, xhr.statusText), xhr.status, parsed))
+    }
+    xhr.onerror = () => reject(new ApiRequestError('network error', 0, null))
+    xhr.onabort = () => reject(new ApiRequestError('upload cancelled', 0, null))
+    if (opts?.signal) {
+      if (opts.signal.aborted) {
+        xhr.abort()
+        return
+      }
+      opts.signal.addEventListener('abort', () => xhr.abort())
+    }
+    xhr.send(form)
+  })
+}
+
+type UploadSession = {
+  upload_id: string
+  received: number
+  declared_size: number
+}
+
+/**
+ * Resumable upload: init a session, PUT chunks (re-syncing from the server's
+ * received offset on a conflict, which is what makes an interrupted upload
+ * resumable), then complete. Progress is reported per chunk.
+ */
+export async function uploadFileResumable(
+  parent: string,
+  file: File,
+  token: string,
+  opts?: UploadOptions,
+): Promise<FileEntry> {
+  const session = await apiJson<UploadSession>('/files/upload/init', {
+    method: 'POST',
+    body: { parent, name: file.name, size: file.size },
+    token,
+  })
+  const uploadId = session.upload_id
+  let offset = session.received
+
+  const putChunk = async (at: number): Promise<UploadSession> => {
+    const end = Math.min(at + CHUNK_SIZE, file.size)
+    const buf = await file.slice(at, end).arrayBuffer()
+    const res = await fetch(
+      apiUrl(
+        `/files/upload/chunk?upload_id=${encodeURIComponent(uploadId)}&offset=${at}`,
+      ),
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/octet-stream',
+        },
+        body: buf,
+      },
+    )
+    const parsed = parseBody(await res.text())
+    if (!res.ok) {
+      if (res.status === 401) notifyUnauthorized()
+      throw new ApiRequestError(detailOf(parsed, res.statusText), res.status, parsed)
+    }
+    return parsed as UploadSession
   }
-  if (!res.ok) {
-    if (res.status === 401) notifyUnauthorized()
-    const detail =
-      parsed && typeof parsed === 'object' && 'detail' in parsed
-        ? String((parsed as { detail: unknown }).detail)
-        : res.statusText
-    throw new ApiRequestError(detail, res.status, parsed)
+
+  opts?.onProgress?.(offset, file.size)
+  while (offset < file.size) {
+    if (opts?.signal?.aborted) {
+      await abortUpload(uploadId, token).catch(() => {})
+      throw new ApiRequestError('upload cancelled', 0, null)
+    }
+    try {
+      const result = await putChunk(offset)
+      offset = result.received
+    } catch (e) {
+      // On an offset conflict, re-sync from the server's view and retry.
+      if (e instanceof ApiRequestError && e.status === 409) {
+        const status = await apiJson<UploadSession>(
+          `/files/upload/status?upload_id=${encodeURIComponent(uploadId)}`,
+          { token },
+        )
+        offset = status.received
+        continue
+      }
+      throw e
+    }
+    opts?.onProgress?.(offset, file.size)
   }
-  return parsed as FileEntry
+
+  return apiJson<FileEntry>('/files/upload/complete', {
+    method: 'POST',
+    body: { upload_id: uploadId, overwrite: opts?.overwrite ?? false },
+    token,
+  })
+}
+
+export async function abortUpload(uploadId: string, token: string): Promise<void> {
+  await apiJson<{ success: boolean }>(
+    `/files/upload?upload_id=${encodeURIComponent(uploadId)}`,
+    { method: 'DELETE', token },
+  )
 }
 
 /**
