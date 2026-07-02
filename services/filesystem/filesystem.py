@@ -20,6 +20,12 @@ class Filesystem:
     async def add_file(self, file: File, owner_id: int, raw_bytes: bytes | None = None):
         await self._processor.add_file(file, owner_id, raw_bytes)
 
+    async def add_file_stream(self, file: File, owner_id: int, src):
+        return await self._processor.add_file_stream(file, owner_id, src)
+
+    async def add_file_from_disk(self, file: File, owner_id: int, src_disk_path: str):
+        return await self._processor.add_file_from_disk(file, owner_id, src_disk_path)
+
     async def get_file(self, owner_id: int, path: str):
         return await self._processor.get_file(owner_id, path)
 

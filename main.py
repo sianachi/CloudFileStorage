@@ -10,6 +10,7 @@ from endpoints.shares import router as shares_router
 from services.auth.auth_management import AuthManagement
 from services.auth.rate_limiter import LoginRateGuard
 from services.filesystem import Filesystem
+from services.filesystem.upload_sessions import UploadSessionManager
 from services.sharing import ShareService
 
 
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
     app.state.auth_management = auth_management
     app.state.login_guard = LoginRateGuard.from_env()
     app.state.share_service = ShareService(root)
+    app.state.upload_sessions = UploadSessionManager(root)
 
     yield
 

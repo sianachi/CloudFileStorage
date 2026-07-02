@@ -9,6 +9,7 @@ from models.auth.user import User
 from services.auth.auth_management import AuthManagement
 from services.auth.rate_limiter import LoginRateGuard
 from services.filesystem import Filesystem
+from services.filesystem.upload_sessions import UploadSessionManager
 from services.sharing import ShareService
 
 
@@ -29,6 +30,10 @@ def get_login_guard(request: Request) -> LoginRateGuard:
 
 def get_share_service(request: Request) -> ShareService:
     return request.app.state.share_service
+
+
+def get_upload_sessions(request: Request) -> UploadSessionManager:
+    return request.app.state.upload_sessions
 
 
 def _trusted_proxies() -> set[str]:

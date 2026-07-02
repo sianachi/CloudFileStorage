@@ -3,6 +3,9 @@ import os
 import secrets
 import shutil
 from datetime import datetime, timezone
+
+from starlette.concurrency import run_in_threadpool
+
 from const import Constants
 
 # Trashed entries are relocated under this synthetic prefix. It is never a
@@ -47,6 +50,13 @@ def parent_of(path: str) -> str:
         return ""
     parent = p.rsplit("/", 1)[0]
     return parent if parent else "/"
+
+
+def _safe_remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -151,6 +161,98 @@ class FilesystemMetadataProcessor(SQLiteService):
             os.makedirs(os.path.dirname(disk_path), exist_ok=True)
             with open(disk_path, "wb") as f:
                 f.write(raw_bytes)
+
+    async def _insert_row(self, db, file: File, owner_id: int, checksum: str | None):
+        normalized = normalize_path(file.path)
+        await db.execute(
+            f"INSERT INTO {self.TABLE_NAME} "
+            "(owner_id, name, path, parent_path, size, creation_date, last_updated, is_directory, checksum) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                owner_id,
+                file.name,
+                normalized,
+                parent_of(normalized),
+                file.size,
+                _dt_to_sql(file.creation_date),
+                _dt_to_sql(file.last_updated),
+                int(file.is_directory),
+                checksum,
+            ),
+        )
+
+    @staticmethod
+    def _stream_to_disk(src, tmp_path: str, chunk_size: int = 1024 * 1024):
+        """Copy a file-like `src` to `tmp_path` in chunks, returning
+        (bytes_written, sha256_hex). Runs off the event loop."""
+        h = hashlib.sha256()
+        total = 0
+        with open(tmp_path, "wb") as out:
+            while True:
+                data = src.read(chunk_size)
+                if not data:
+                    break
+                out.write(data)
+                h.update(data)
+                total += len(data)
+        return total, h.hexdigest()
+
+    async def add_file_stream(self, file: File, owner_id: int, src) -> File:
+        """Write an uploaded file by streaming `src` to disk in bounded memory,
+        with partial-write rollback. Sets file.size and file.checksum.
+
+        Order is: stream to a .part temp, atomically move into place, then
+        insert metadata (rolling back the bytes if the insert fails) — so we
+        never leave a metadata row pointing at missing bytes.
+        """
+        normalized = normalize_path(file.path)
+        disk_path = self._disk_path(owner_id, normalized)
+        os.makedirs(os.path.dirname(disk_path), exist_ok=True)
+        tmp_path = f"{disk_path}.part-{secrets.token_hex(6)}"
+        try:
+            if hasattr(src, "seek"):
+                src.seek(0)
+            size, checksum = await run_in_threadpool(
+                self._stream_to_disk, src, tmp_path
+            )
+            os.replace(tmp_path, disk_path)
+        except Exception:
+            _safe_remove(tmp_path)
+            raise
+
+        try:
+            file.size = size
+            async with self._connect() as db:
+                await self._insert_row(db, file, owner_id, checksum)
+                await db.commit()
+        except Exception:
+            _safe_remove(disk_path)
+            raise
+        file.checksum = checksum
+        return file
+
+    async def add_file_from_disk(
+        self, file: File, owner_id: int, src_disk_path: str
+    ) -> File:
+        """Finalize a resumable upload: adopt an already-assembled file on disk
+        as the entry's bytes (checksum + size computed here), then insert
+        metadata. Used by the chunked upload protocol."""
+        normalized = normalize_path(file.path)
+        disk_path = self._disk_path(owner_id, normalized)
+        size = os.path.getsize(src_disk_path)
+        checksum = await run_in_threadpool(sha256_file, src_disk_path)
+        os.makedirs(os.path.dirname(disk_path), exist_ok=True)
+        os.replace(src_disk_path, disk_path)
+        try:
+            file.size = size
+            async with self._connect() as db:
+                await self._insert_row(db, file, owner_id, checksum)
+                await db.commit()
+        except Exception:
+            _safe_remove(disk_path)
+            raise
+        file.checksum = checksum
+        return file
 
     async def get_file(
         self, owner_id: int, path: str, include_deleted: bool = False

@@ -137,6 +137,23 @@ class SaveContentRequest(BaseModel):
     content: str
 
 
+class UploadInitRequest(BaseModel):
+    parent: str = Field("/", min_length=1)
+    name: str = Field(..., min_length=1)
+    size: int = Field(..., ge=0)
+
+
+class UploadSessionResponse(BaseModel):
+    upload_id: str
+    received: int
+    declared_size: int
+
+
+class UploadCompleteRequest(BaseModel):
+    upload_id: str = Field(..., min_length=1)
+    overwrite: bool = False
+
+
 class CreateShareRequest(BaseModel):
     path: str = Field(..., min_length=1)
     target_username: str | None = None

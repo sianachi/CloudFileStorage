@@ -8,11 +8,19 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Iterator
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File as FastAPIFile,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, StreamingResponse
 from stream_zip import ZIP_64, stream_zip
 
-from dependencies import get_current_user, get_filesystem
+from dependencies import get_current_user, get_filesystem, get_upload_sessions
 from dto.dto import (
     CreateFolderRequest,
     DeleteResponse,
@@ -26,6 +34,9 @@ from dto.dto import (
     SearchResponse,
     TrashEntry,
     TrashListResponse,
+    UploadCompleteRequest,
+    UploadInitRequest,
+    UploadSessionResponse,
     VerifyResponse,
     VersionEntry,
     VersionListResponse,
@@ -42,6 +53,7 @@ from services.filesystem.filesystem_metadata_processor import (
     parent_of,
     sha256_file,
 )
+from services.filesystem.upload_sessions import UploadSessionManager
 
 
 router = APIRouter(tags=["files"])
@@ -170,19 +182,148 @@ async def upload_file(
         await filesystem.snapshot_version(user.id, full_path)
         await filesystem.remove_file(existing, user.id)
 
-    # NOTE: read whole upload into memory — fine for small files; revisit
-    # for streaming if uploads grow past tens of MB.
-    raw = await upload.read()
+    # Stream the upload straight to disk in bounded memory (with partial-write
+    # rollback) rather than buffering the whole body in RAM.
     now = datetime.now(timezone.utc)
     new_file = FileModel(
         name=name,
         path=full_path,
-        size=len(raw),
+        size=0,
         creation_date=now,
         last_updated=now,
         is_directory=False,
     )
-    await filesystem.add_file(new_file, user.id, raw)
+    await filesystem.add_file_stream(new_file, user.id, upload.file)
+    return _to_entry(new_file)
+
+
+# --- resumable chunked upload -------------------------------------------
+#
+# For large files or flaky connections: init a session, PUT byte ranges (the
+# client can query status and resume from the last received offset), then
+# complete to finalize. Bytes accumulate in a temp .part file so nothing is
+# held in memory.
+
+_MAX_CHUNK_BYTES = 16 * 1024 * 1024
+
+
+@router.post("/files/upload/init", response_model=UploadSessionResponse)
+async def upload_init(
+    body: UploadInitRequest,
+    filesystem: Filesystem = Depends(get_filesystem),
+    sessions: UploadSessionManager = Depends(get_upload_sessions),
+    user: User = Depends(get_current_user),
+) -> UploadSessionResponse:
+    parent_path = _safe_user_path(body.parent) if body.parent != "/" else "/"
+    if parent_path != "/":
+        target = await filesystem.get_file(user.id, parent_path)
+        if target is None or not target.is_directory:
+            raise HTTPException(status_code=404, detail="parent folder does not exist")
+    name = body.name.strip()
+    if not name or "/" in name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="invalid filename")
+
+    session = sessions.create(user.id, parent_path, name, body.size)
+    return UploadSessionResponse(
+        upload_id=session.upload_id,
+        received=session.received,
+        declared_size=session.declared_size,
+    )
+
+
+@router.get("/files/upload/status", response_model=UploadSessionResponse)
+async def upload_status(
+    upload_id: str = Query(...),
+    sessions: UploadSessionManager = Depends(get_upload_sessions),
+    user: User = Depends(get_current_user),
+) -> UploadSessionResponse:
+    session = sessions.get(upload_id, user.id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="upload session not found")
+    return UploadSessionResponse(
+        upload_id=session.upload_id,
+        received=session.received,
+        declared_size=session.declared_size,
+    )
+
+
+@router.put("/files/upload/chunk", response_model=UploadSessionResponse)
+async def upload_chunk(
+    request: Request,
+    upload_id: str = Query(...),
+    offset: int = Query(..., ge=0),
+    sessions: UploadSessionManager = Depends(get_upload_sessions),
+    user: User = Depends(get_current_user),
+) -> UploadSessionResponse:
+    session = sessions.get(upload_id, user.id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="upload session not found")
+    data = await request.body()
+    if len(data) > _MAX_CHUNK_BYTES:
+        raise HTTPException(status_code=413, detail="chunk too large")
+    try:
+        received = sessions.append(session, offset, data)
+    except ValueError as exc:
+        # Offset mismatch — the client should re-sync from /status and resume.
+        raise HTTPException(status_code=409, detail=str(exc))
+    return UploadSessionResponse(
+        upload_id=session.upload_id,
+        received=received,
+        declared_size=session.declared_size,
+    )
+
+
+@router.delete("/files/upload", response_model=DeleteResponse)
+async def upload_abort(
+    upload_id: str = Query(...),
+    sessions: UploadSessionManager = Depends(get_upload_sessions),
+    user: User = Depends(get_current_user),
+) -> DeleteResponse:
+    session = sessions.get(upload_id, user.id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="upload session not found")
+    sessions.discard(session)
+    return DeleteResponse(success=True, message="upload aborted")
+
+
+@router.post("/files/upload/complete", response_model=FileEntry)
+async def upload_complete(
+    body: UploadCompleteRequest,
+    filesystem: Filesystem = Depends(get_filesystem),
+    sessions: UploadSessionManager = Depends(get_upload_sessions),
+    user: User = Depends(get_current_user),
+) -> FileEntry:
+    session = sessions.get(body.upload_id, user.id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="upload session not found")
+
+    parent_path = session.parent
+    full_path = _safe_user_path(
+        f"/{session.name}" if parent_path == "/" else f"{parent_path}/{session.name}"
+    )
+
+    existing = await filesystem.get_file(user.id, full_path)
+    if existing is not None:
+        if not body.overwrite:
+            sessions.discard(session)
+            raise HTTPException(status_code=409, detail="a file or folder already exists at that path")
+        if existing.is_directory:
+            sessions.discard(session)
+            raise HTTPException(status_code=409, detail="cannot overwrite a folder with a file")
+        await filesystem.snapshot_version(user.id, full_path)
+        await filesystem.remove_file(existing, user.id)
+
+    tmp_path = sessions.finalize_path(session)
+    now = datetime.now(timezone.utc)
+    new_file = FileModel(
+        name=session.name,
+        path=full_path,
+        size=0,
+        creation_date=now,
+        last_updated=now,
+        is_directory=False,
+    )
+    await filesystem.add_file_from_disk(new_file, user.id, tmp_path)
     return _to_entry(new_file)
 
 
