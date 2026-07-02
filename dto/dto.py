@@ -10,6 +10,15 @@ class FileEntry(BaseModel):
     size: int
     is_directory: bool
     last_updated: str
+    checksum: str | None = None
+
+
+class VerifyResponse(BaseModel):
+    path: str
+    algorithm: str = "sha256"
+    stored_checksum: str | None
+    computed_checksum: str
+    ok: bool
 
 
 class ListResponse(BaseModel):

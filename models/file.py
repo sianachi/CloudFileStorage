@@ -9,3 +9,5 @@ class File:
     creation_date: datetime
     last_updated: datetime
     is_directory: bool = False
+    # SHA-256 hex digest of the file's bytes; None for directories.
+    checksum: str | None = None

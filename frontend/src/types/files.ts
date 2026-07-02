@@ -4,6 +4,7 @@ export type FileEntry = {
   size: number
   is_directory: boolean
   last_updated: string
+  checksum?: string | null
 }
 
 export type ListResponse = {

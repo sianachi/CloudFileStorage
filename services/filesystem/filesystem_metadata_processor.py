@@ -1,3 +1,4 @@
+import hashlib
 import os
 import secrets
 import shutil
@@ -44,7 +45,21 @@ def parent_of(path: str) -> str:
     return parent if parent else "/"
 
 
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(disk_path: str, chunk_size: int = 1024 * 1024) -> str:
+    """SHA-256 of a file on disk, read in chunks to bound memory."""
+    h = hashlib.sha256()
+    with open(disk_path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _row_to_file(row) -> File:
+    keys = row.keys()
     return File(
         name=row["name"],
         size=row["size"],
@@ -56,6 +71,7 @@ def _row_to_file(row) -> File:
         last_updated=datetime.fromisoformat(row["last_updated"])
         if isinstance(row["last_updated"], str)
         else row["last_updated"],
+        checksum=row["checksum"] if "checksum" in keys else None,
     )
 
 
@@ -97,11 +113,21 @@ class FilesystemMetadataProcessor(SQLiteService):
         parent = parent_of(normalized)
         disk_path = self._disk_path(owner_id, normalized)
 
+        # Fingerprint file bytes on write so integrity can be verified later.
+        checksum = (
+            _sha256_bytes(raw_bytes)
+            if raw_bytes is not None and not file.is_directory
+            else file.checksum
+        )
+        # Reflect the computed digest back on the caller's object so the
+        # response it builds carries the checksum without a re-read.
+        file.checksum = checksum
+
         async with self._connect() as db:
             await db.execute(
                 f"INSERT INTO {self.TABLE_NAME} "
-                "(owner_id, name, path, parent_path, size, creation_date, last_updated, is_directory) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(owner_id, name, path, parent_path, size, creation_date, last_updated, is_directory, checksum) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     owner_id,
                     file.name,
@@ -111,6 +137,7 @@ class FilesystemMetadataProcessor(SQLiteService):
                     _dt_to_sql(file.creation_date),
                     _dt_to_sql(file.last_updated),
                     int(file.is_directory),
+                    checksum,
                 ),
             )
             await db.commit()

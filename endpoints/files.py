@@ -26,6 +26,7 @@ from dto.dto import (
     SearchResponse,
     TrashEntry,
     TrashListResponse,
+    VerifyResponse,
     ViewTokenRequest,
     ViewTokenResponse,
     ZipEntry,
@@ -34,7 +35,11 @@ from dto.dto import (
 from models.auth.user import User
 from models.file import File as FileModel
 from services.filesystem import Filesystem
-from services.filesystem.filesystem_metadata_processor import normalize_path, parent_of
+from services.filesystem.filesystem_metadata_processor import (
+    normalize_path,
+    parent_of,
+    sha256_file,
+)
 
 
 router = APIRouter(tags=["files"])
@@ -90,6 +95,7 @@ def _to_entry(f: FileModel) -> FileEntry:
         size=f.size,
         is_directory=f.is_directory,
         last_updated=f.last_updated.isoformat() if isinstance(f.last_updated, datetime) else str(f.last_updated),
+        checksum=f.checksum,
     )
 
 
@@ -210,6 +216,31 @@ async def save_file_content(
     )
     await filesystem.add_file(new_file, user.id, raw)
     return _to_entry(new_file)
+
+
+@router.get("/files/verify", response_model=VerifyResponse)
+async def verify_file(
+    path: str = Query(...),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> VerifyResponse:
+    """Recompute a file's SHA-256 from disk and compare to the stored digest,
+    detecting silent corruption or tampering."""
+    normalized = _safe_user_path(path)
+    target = await filesystem.get_file(user.id, normalized)
+    if target is None or target.is_directory:
+        raise HTTPException(status_code=404, detail="file not found")
+    disk_path = filesystem.resolve_disk_path(user.id, normalized)
+    if not os.path.isfile(disk_path):
+        raise HTTPException(status_code=404, detail="file content missing")
+
+    computed = sha256_file(disk_path)
+    return VerifyResponse(
+        path=normalized,
+        stored_checksum=target.checksum,
+        computed_checksum=computed,
+        ok=target.checksum == computed,
+    )
 
 
 @router.get("/files/download")

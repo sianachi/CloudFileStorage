@@ -41,4 +41,10 @@ METADATA_MIGRATIONS: list[Migration] = [
             "ON metadata (owner_id, deleted_at)",
         ],
     ),
+    # v2: store a SHA-256 of each file's bytes for integrity verification.
+    Migration(
+        version=2,
+        name="add_checksum",
+        statements=["ALTER TABLE metadata ADD COLUMN checksum TEXT"],
+    ),
 ]
