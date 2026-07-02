@@ -58,6 +58,13 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+    @application.get("/healthz", tags=["health"])
+    async def healthz() -> dict:
+        # Deliberately does not touch the DB or disk — a liveness/readiness
+        # probe should report that the process is up and serving, not gate on
+        # storage being reachable (SQLite init already happened in lifespan).
+        return {"status": "ok"}
+
     application.include_router(auth_router)
     application.include_router(files_router)
     application.include_router(shares_router)
