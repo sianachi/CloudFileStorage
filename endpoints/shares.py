@@ -8,7 +8,6 @@ optional subpath within it; the handler resolves that to a path in the
 sharer's owner_id. Authorization is checked centrally in the resolver.
 """
 
-import mimetypes
 import os
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -437,12 +436,17 @@ async def public_download(
     if not os.path.isfile(disk_path):
         raise HTTPException(status_code=404, detail="file content missing")
 
-    guessed, _ = mimetypes.guess_type(target.name)
+    # Public links are unauthenticated and serve user-supplied bytes on our own
+    # origin. Never render inline (a malicious HTML file could run script and
+    # read localStorage auth tokens). Force a download with a non-sniffable,
+    # non-executable type and a locked-down CSP.
     return FileResponse(
         path=disk_path,
         filename=target.name,
-        media_type=guessed or "application/octet-stream",
+        media_type="application/octet-stream",
         headers={
-            "Content-Disposition": f"inline; filename*=UTF-8''{quote(target.name)}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(target.name)}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
         },
     )
