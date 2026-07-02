@@ -41,6 +41,18 @@ class Filesystem:
     async def empty_trash(self, owner_id: int):
         return await self._processor.empty_trash(owner_id)
 
+    async def snapshot_version(self, owner_id: int, path: str):
+        await self._processor.snapshot_version(owner_id, path)
+
+    async def list_versions(self, owner_id: int, path: str):
+        return await self._processor.list_versions(owner_id, path)
+
+    async def version_disk_path(self, owner_id: int, path: str, version_no: int):
+        return await self._processor.version_disk_path(owner_id, path, version_no)
+
+    async def restore_version(self, owner_id: int, path: str, version_no: int):
+        return await self._processor.restore_version(owner_id, path, version_no)
+
     async def update_file(self, file: File, owner_id: int):
         await self._processor.update_file(file, owner_id)
 

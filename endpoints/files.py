@@ -27,6 +27,8 @@ from dto.dto import (
     TrashEntry,
     TrashListResponse,
     VerifyResponse,
+    VersionEntry,
+    VersionListResponse,
     ViewTokenRequest,
     ViewTokenResponse,
     ZipEntry,
@@ -164,6 +166,8 @@ async def upload_file(
             # We deliberately refuse this even with overwrite=true — replacing
             # a folder with a file would silently lose every entry inside it.
             raise HTTPException(status_code=409, detail="cannot overwrite a folder with a file")
+        # Preserve the bytes we're about to replace as a prior version.
+        await filesystem.snapshot_version(user.id, full_path)
         await filesystem.remove_file(existing, user.id)
 
     # NOTE: read whole upload into memory — fine for small files; revisit
@@ -203,7 +207,8 @@ async def save_file_content(
         raise HTTPException(status_code=409, detail="cannot write to a folder")
 
     raw = body.content.encode("utf-8")
-    # Two-step replace mirrors the overwrite path on the upload route.
+    # Snapshot the current contents, then two-step replace (mirrors upload).
+    await filesystem.snapshot_version(user.id, normalized)
     await filesystem.remove_file(target, user.id)
     now = datetime.now(timezone.utc)
     new_file = FileModel(
@@ -216,6 +221,69 @@ async def save_file_content(
     )
     await filesystem.add_file(new_file, user.id, raw)
     return _to_entry(new_file)
+
+
+@router.get("/files/versions", response_model=VersionListResponse)
+async def list_file_versions(
+    path: str = Query(...),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> VersionListResponse:
+    normalized = _safe_user_path(path)
+    target = await filesystem.get_file(user.id, normalized)
+    if target is None or target.is_directory:
+        raise HTTPException(status_code=404, detail="file not found")
+    rows = await filesystem.list_versions(user.id, normalized)
+    versions = [
+        VersionEntry(
+            version_no=r["version_no"],
+            size=r["size"],
+            checksum=r["checksum"],
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+    return VersionListResponse(path=normalized, versions=versions)
+
+
+@router.get("/files/versions/download")
+async def download_file_version(
+    path: str = Query(...),
+    version: int = Query(..., ge=1),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+):
+    normalized = _safe_user_path(path)
+    target = await filesystem.get_file(user.id, normalized)
+    if target is None or target.is_directory:
+        raise HTTPException(status_code=404, detail="file not found")
+    disk_path = await filesystem.version_disk_path(user.id, normalized, version)
+    if disk_path is None:
+        raise HTTPException(status_code=404, detail="version not found")
+
+    download_name = f"{target.name}.v{version}"
+    return FileResponse(
+        path=disk_path,
+        filename=download_name,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(download_name)}"
+        },
+    )
+
+
+@router.post("/files/versions/restore", response_model=FileEntry)
+async def restore_file_version(
+    path: str = Query(...),
+    version: int = Query(..., ge=1),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> FileEntry:
+    normalized = _safe_user_path(path)
+    restored = await filesystem.restore_version(user.id, normalized, version)
+    if restored is None:
+        raise HTTPException(status_code=404, detail="file or version not found")
+    return _to_entry(restored)
 
 
 @router.get("/files/verify", response_model=VerifyResponse)

@@ -47,4 +47,26 @@ METADATA_MIGRATIONS: list[Migration] = [
         name="add_checksum",
         statements=["ALTER TABLE metadata ADD COLUMN checksum TEXT"],
     ),
+    # v3: file version history. Each overwrite snapshots the prior bytes into
+    # a hidden .versions store; disk_ref names the blob on disk.
+    Migration(
+        version=3,
+        name="add_file_versions",
+        statements=[
+            """
+            CREATE TABLE IF NOT EXISTS file_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                version_no INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                checksum TEXT,
+                disk_ref TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_versions_owner_path "
+            "ON file_versions (owner_id, path, version_no)",
+        ],
+    ),
 ]

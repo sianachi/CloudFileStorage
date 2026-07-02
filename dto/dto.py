@@ -137,6 +137,18 @@ class SaveContentRequest(BaseModel):
     content: str
 
 
+class VersionEntry(BaseModel):
+    version_no: int
+    size: int
+    checksum: str | None
+    created_at: str
+
+
+class VersionListResponse(BaseModel):
+    path: str
+    versions: list[VersionEntry]
+
+
 class TrashEntry(BaseModel):
     name: str
     trash_path: str  # current path within the hidden trash namespace

@@ -11,6 +11,10 @@ from const import Constants
 # that the app itself controls), so it can't collide with user content.
 TRASH_PREFIX = "/.trash"
 
+# Prior versions of overwritten files are stored as opaque blobs here, keyed
+# by a random disk_ref. Never a real metadata row.
+VERSIONS_PREFIX = "/.versions"
+
 from models.file import File
 from services.migrations import apply_migrations
 from services.schema import BASELINE_VERSION, METADATA_MIGRATIONS
@@ -228,45 +232,11 @@ class FilesystemMetadataProcessor(SQLiteService):
         if collision is not None:
             raise FileExistsError(new_normalized)
 
-        old_prefix_len = len(old_normalized)
         async with self._connect() as db:
-            if existing.is_directory:
-                # Update self.
-                await db.execute(
-                    f"UPDATE {self.TABLE_NAME} SET path = ?, name = ? "
-                    "WHERE owner_id = ? AND path = ?",
-                    (new_normalized, new_name, owner_id, old_normalized),
-                )
-                # Update every descendant: substitute the old prefix with
-                # the new one in both `path` and `parent_path`. SUBSTR is
-                # 1-indexed, so we skip past `old_prefix_len` characters.
-                await db.execute(
-                    f"UPDATE {self.TABLE_NAME} SET "
-                    "path = ? || SUBSTR(path, ?), "
-                    "parent_path = ? || SUBSTR(parent_path, ?) "
-                    "WHERE owner_id = ? AND path LIKE ?",
-                    (
-                        new_normalized,
-                        old_prefix_len + 1,
-                        new_normalized,
-                        old_prefix_len + 1,
-                        owner_id,
-                        old_normalized + "/%",
-                    ),
-                )
-            else:
-                await db.execute(
-                    f"UPDATE {self.TABLE_NAME} SET path = ?, name = ? "
-                    "WHERE owner_id = ? AND path = ?",
-                    (new_normalized, new_name, owner_id, old_normalized),
-                )
+            await self._relocate_subtree(
+                db, owner_id, old_normalized, new_normalized, existing.is_directory
+            )
             await db.commit()
-
-        old_disk = self._disk_path(owner_id, old_normalized)
-        new_disk = self._disk_path(owner_id, new_normalized)
-        if os.path.exists(old_disk):
-            os.makedirs(os.path.dirname(new_disk), exist_ok=True)
-            os.rename(old_disk, new_disk)
 
         return await self.get_file(owner_id, new_normalized)
 
@@ -335,6 +305,12 @@ class FilesystemMetadataProcessor(SQLiteService):
             "WHERE owner_id = ? AND path = ?",
             (new_path, new_name, new_parent, owner_id, old_path),
         )
+        # Version history follows the file: keep file_versions.path in sync so
+        # a renamed/moved/trashed file keeps its history.
+        await db.execute(
+            "UPDATE file_versions SET path = ? WHERE owner_id = ? AND path = ?",
+            (new_path, owner_id, old_path),
+        )
         if is_directory:
             old_prefix_len = len(old_path)
             await db.execute(
@@ -350,6 +326,11 @@ class FilesystemMetadataProcessor(SQLiteService):
                     owner_id,
                     old_path + "/%",
                 ),
+            )
+            await db.execute(
+                "UPDATE file_versions SET path = ? || SUBSTR(path, ?) "
+                "WHERE owner_id = ? AND path LIKE ?",
+                (new_path, old_prefix_len + 1, owner_id, old_path + "/%"),
             )
         old_disk = self._disk_path(owner_id, old_path)
         new_disk = self._disk_path(owner_id, new_path)
@@ -501,6 +482,7 @@ class FilesystemMetadataProcessor(SQLiteService):
         if root is None:
             return False
         normalized = normalize_path(trash_path)
+        await self._delete_versions(owner_id, normalized)
         async with self._connect() as db:
             await db.execute(
                 f"DELETE FROM {self.TABLE_NAME} "
@@ -525,6 +507,139 @@ class FilesystemMetadataProcessor(SQLiteService):
         for root in roots:
             await self.purge(owner_id, root["path"])
         return len(roots)
+
+    # --- version history --------------------------------------------------
+
+    def _version_disk_path(self, owner_id: int, disk_ref: str) -> str:
+        return self._disk_path(owner_id, f"{VERSIONS_PREFIX}/{disk_ref}")
+
+    async def snapshot_version(self, owner_id: int, path: str) -> None:
+        """Copy a file's *current* bytes into version history before it is
+        overwritten. No-op if the path is missing, a directory, or has no
+        bytes on disk yet."""
+        normalized = normalize_path(path)
+        current = await self.get_file(owner_id, normalized)
+        if current is None or current.is_directory:
+            return
+        src_disk = self._disk_path(owner_id, normalized)
+        if not os.path.isfile(src_disk):
+            return
+
+        disk_ref = secrets.token_hex(16)
+        dest_disk = self._version_disk_path(owner_id, disk_ref)
+        os.makedirs(os.path.dirname(dest_disk), exist_ok=True)
+        shutil.copy2(src_disk, dest_disk)
+
+        checksum = current.checksum or sha256_file(src_disk)
+        now = datetime.now(timezone.utc).isoformat()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT COALESCE(MAX(version_no), 0) AS m FROM file_versions "
+                "WHERE owner_id = ? AND path = ?",
+                (owner_id, normalized),
+            )
+            row = await cursor.fetchone()
+            next_no = int(row["m"]) + 1
+            await db.execute(
+                "INSERT INTO file_versions "
+                "(owner_id, path, version_no, size, checksum, disk_ref, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (owner_id, normalized, next_no, current.size, checksum, disk_ref, now),
+            )
+            await db.commit()
+
+    async def list_versions(self, owner_id: int, path: str) -> list[dict]:
+        normalized = normalize_path(path)
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT version_no, size, checksum, created_at FROM file_versions "
+                "WHERE owner_id = ? AND path = ? ORDER BY version_no DESC",
+                (owner_id, normalized),
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+
+    async def _version_row(
+        self, owner_id: int, path: str, version_no: int
+    ) -> dict | None:
+        normalized = normalize_path(path)
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT * FROM file_versions "
+                "WHERE owner_id = ? AND path = ? AND version_no = ?",
+                (owner_id, normalized, version_no),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row is not None else None
+
+    async def version_disk_path(
+        self, owner_id: int, path: str, version_no: int
+    ) -> str | None:
+        """On-disk path of a specific version's blob, for download."""
+        row = await self._version_row(owner_id, path, version_no)
+        if row is None:
+            return None
+        disk = self._version_disk_path(owner_id, row["disk_ref"])
+        return disk if os.path.isfile(disk) else None
+
+    async def restore_version(
+        self, owner_id: int, path: str, version_no: int
+    ) -> File | None:
+        """Roll a file's contents back to an earlier version.
+
+        The current bytes are snapshotted first (so the roll-back is itself
+        reversible), then the chosen version's bytes become current and the
+        metadata size/checksum/last_updated are updated.
+        """
+        normalized = normalize_path(path)
+        current = await self.get_file(owner_id, normalized)
+        if current is None or current.is_directory:
+            return None
+        row = await self._version_row(owner_id, normalized, version_no)
+        if row is None:
+            return None
+        ver_disk = self._version_disk_path(owner_id, row["disk_ref"])
+        if not os.path.isfile(ver_disk):
+            return None
+
+        # Preserve the current bytes as a new version before overwriting.
+        await self.snapshot_version(owner_id, normalized)
+
+        cur_disk = self._disk_path(owner_id, normalized)
+        os.makedirs(os.path.dirname(cur_disk), exist_ok=True)
+        shutil.copy2(ver_disk, cur_disk)
+
+        now = datetime.now(timezone.utc).isoformat()
+        async with self._connect() as db:
+            await db.execute(
+                f"UPDATE {self.TABLE_NAME} SET size = ?, checksum = ?, last_updated = ? "
+                "WHERE owner_id = ? AND path = ?",
+                (row["size"], row["checksum"], now, owner_id, normalized),
+            )
+            await db.commit()
+        return await self.get_file(owner_id, normalized)
+
+    async def _delete_versions(self, owner_id: int, path: str) -> None:
+        """Remove all version rows and blobs for a path (and, if a folder,
+        its descendants). Used when content is permanently purged."""
+        normalized = normalize_path(path)
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT disk_ref FROM file_versions "
+                "WHERE owner_id = ? AND (path = ? OR path LIKE ?)",
+                (owner_id, normalized, f"{normalized}/%"),
+            )
+            refs = [r["disk_ref"] for r in await cursor.fetchall()]
+            await db.execute(
+                "DELETE FROM file_versions "
+                "WHERE owner_id = ? AND (path = ? OR path LIKE ?)",
+                (owner_id, normalized, f"{normalized}/%"),
+            )
+            await db.commit()
+        for ref in refs:
+            try:
+                os.remove(self._version_disk_path(owner_id, ref))
+            except FileNotFoundError:
+                pass
 
     def resolve_disk_path(self, owner_id: int, path: str) -> str:
         """Public accessor for the on-disk path; used by download streaming."""
