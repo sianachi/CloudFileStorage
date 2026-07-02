@@ -5,6 +5,7 @@ export type FileEntry = {
   is_directory: boolean
   last_updated: string
   checksum?: string | null
+  is_favorite?: boolean
 }
 
 export type ListResponse = {

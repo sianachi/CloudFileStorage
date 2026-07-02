@@ -160,9 +160,49 @@ export async function restoreVersion(
   )
 }
 
-export function versionDownloadUrl(path: string, version: number): string {
-  return apiUrl(
-    `/files/versions/download?path=${encodeURIComponent(path)}&version=${version}`,
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function fetchAndSave(url: string, filename: string, token: string): Promise<void> {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) {
+    if (res.status === 401) notifyUnauthorized()
+    throw new ApiRequestError(res.statusText, res.status, null)
+  }
+  saveBlob(await res.blob(), filename)
+}
+
+export async function downloadVersion(
+  path: string,
+  version: number,
+  token: string,
+): Promise<void> {
+  const name = path.split('/').pop() || 'file'
+  await fetchAndSave(
+    apiUrl(`/files/versions/download?path=${encodeURIComponent(path)}&version=${version}`),
+    `${name}.v${version}`,
+    token,
+  )
+}
+
+export async function downloadSharedFile(
+  shareId: number,
+  subpath: string,
+  filename: string,
+  token: string,
+): Promise<void> {
+  await fetchAndSave(
+    apiUrl(`/shares/with-me/download?id=${shareId}&subpath=${encodeURIComponent(subpath)}`),
+    filename,
+    token,
   )
 }
 
