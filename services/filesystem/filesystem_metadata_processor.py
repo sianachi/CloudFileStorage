@@ -304,6 +304,53 @@ class FilesystemMetadataProcessor(SQLiteService):
             os.makedirs(os.path.dirname(new_disk), exist_ok=True)
             os.rename(old_disk, new_disk)
 
+    async def move(
+        self, owner_id: int, source: str, destination_parent: str
+    ) -> File | None:
+        """Move an entry into another folder, keeping its name.
+
+        Returns the moved File, None if the source doesn't exist, or raises
+        ValueError (illegal move), FileNotFoundError (missing destination) or
+        FileExistsError (name taken at the destination).
+        """
+        src = normalize_path(source)
+        if src == "/":
+            raise ValueError("cannot move root")
+
+        existing = await self.get_file(owner_id, src)
+        if existing is None:
+            return None
+
+        dest_parent = normalize_path(destination_parent)
+        if dest_parent != "/":
+            parent_row = await self.get_file(owner_id, dest_parent)
+            if parent_row is None or not parent_row.is_directory:
+                raise FileNotFoundError(dest_parent)
+
+        new_path = (
+            f"/{existing.name}"
+            if dest_parent == "/"
+            else f"{dest_parent}/{existing.name}"
+        )
+        if new_path == src:
+            return existing  # already there — no-op
+
+        # A folder cannot be moved into itself or any of its own descendants.
+        if existing.is_directory and (
+            dest_parent == src or dest_parent.startswith(src + "/")
+        ):
+            raise ValueError("cannot move a folder into itself")
+
+        if await self.get_file(owner_id, new_path) is not None:
+            raise FileExistsError(new_path)
+
+        async with self._connect() as db:
+            await self._relocate_subtree(
+                db, owner_id, src, new_path, existing.is_directory
+            )
+            await db.commit()
+        return await self.get_file(owner_id, new_path)
+
     async def soft_delete(self, file: File, owner_id: int) -> None:
         """Move an entry into the user's trash instead of destroying it.
 

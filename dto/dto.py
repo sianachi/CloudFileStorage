@@ -25,6 +25,11 @@ class RenameRequest(BaseModel):
     new_name: str = Field(..., min_length=1)
 
 
+class MoveRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    destination_parent: str = Field(..., min_length=1)
+
+
 class QuotaResponse(BaseModel):
     bytes_used: int
     bytes_limit: int | None = None

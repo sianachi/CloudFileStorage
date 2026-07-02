@@ -50,6 +50,9 @@ class Filesystem:
     async def rename(self, owner_id: int, old_path: str, new_name: str):
         return await self._processor.rename(owner_id, old_path, new_name)
 
+    async def move(self, owner_id: int, source: str, destination_parent: str):
+        return await self._processor.move(owner_id, source, destination_parent)
+
     async def bytes_used(self, owner_id: int) -> int:
         return await self._processor.bytes_used(owner_id)
 

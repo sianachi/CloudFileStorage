@@ -19,6 +19,7 @@ from dto.dto import (
     EmptyTrashResponse,
     FileEntry,
     ListResponse,
+    MoveRequest,
     QuotaResponse,
     RenameRequest,
     SaveContentRequest,
@@ -420,6 +421,29 @@ async def rename_entry(
         result = await filesystem.rename(user.id, normalized, new_name)
     except FileExistsError:
         raise HTTPException(status_code=409, detail="a file or folder already exists with that name")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if result is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return _to_entry(result)
+
+
+@router.post("/files/move", response_model=FileEntry)
+async def move_entry(
+    body: MoveRequest,
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> FileEntry:
+    source = _safe_user_path(body.source)
+    destination = _safe_user_path(body.destination_parent) if body.destination_parent != "/" else "/"
+    try:
+        result = await filesystem.move(user.id, source, destination)
+    except FileExistsError:
+        raise HTTPException(
+            status_code=409, detail="a file or folder with that name already exists there"
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="destination folder does not exist")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if result is None:
