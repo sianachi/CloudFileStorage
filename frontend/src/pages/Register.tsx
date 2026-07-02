@@ -26,7 +26,6 @@ export function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordFocused, setPasswordFocused] = useState(false)
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -63,7 +62,7 @@ export function Register() {
 
     setSubmitting(true)
     try {
-      await register(username.trim(), password, email.trim())
+      await register(username.trim(), password)
       navigate('/app', { replace: true })
     } catch (err) {
       setError(formatRegisterError(err))
@@ -113,25 +112,6 @@ export function Register() {
             minLength={1}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="mt-1 w-full rounded-md border border-secondary bg-background/80 px-3 py-2 text-primary-text shadow-sm outline-none backdrop-blur-sm focus:border-accent focus:ring-2 focus:ring-accent/20"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="register-email"
-            className="block text-sm font-medium text-primary-text"
-          >
-            Email
-          </label>
-          <input
-            id="register-email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            minLength={3}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             className="mt-1 w-full rounded-md border border-secondary bg-background/80 px-3 py-2 text-primary-text shadow-sm outline-none backdrop-blur-sm focus:border-accent focus:ring-2 focus:ring-accent/20"
           />
         </div>
