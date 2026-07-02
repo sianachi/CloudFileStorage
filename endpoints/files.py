@@ -23,6 +23,7 @@ from dto.dto import (
     QuotaResponse,
     RenameRequest,
     SaveContentRequest,
+    SearchResponse,
     TrashEntry,
     TrashListResponse,
     ViewTokenRequest,
@@ -115,6 +116,17 @@ async def list_files(
             raise HTTPException(status_code=404, detail="folder not found")
     children = await filesystem.list_children(user.id, normalized)
     return ListResponse(path=normalized, entries=[_to_entry(c) for c in children])
+
+
+@router.get("/files/search", response_model=SearchResponse)
+async def search_files(
+    q: str = Query(..., min_length=1, description="substring to match on file/folder names"),
+    limit: int = Query(100, ge=1, le=500),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> SearchResponse:
+    results = await filesystem.search(user.id, q, limit)
+    return SearchResponse(query=q, entries=[_to_entry(f) for f in results])
 
 
 @router.post("/files", response_model=FileEntry)

@@ -17,6 +17,11 @@ class ListResponse(BaseModel):
     entries: list[FileEntry]
 
 
+class SearchResponse(BaseModel):
+    query: str
+    entries: list[FileEntry]
+
+
 class CreateFolderRequest(BaseModel):
     path: str = Field(..., min_length=1)
 

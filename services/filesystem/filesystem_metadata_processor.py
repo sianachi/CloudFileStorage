@@ -256,6 +256,32 @@ class FilesystemMetadataProcessor(SQLiteService):
             rows = await cursor.fetchall()
             return [_row_to_file(row) for row in rows]
 
+    async def search(
+        self, owner_id: int, query: str, limit: int = 100
+    ) -> list[File]:
+        """Case-insensitive substring match on entry names for one owner.
+
+        Trashed entries are excluded (deleted_at IS NULL). LIKE metacharacters
+        in the query are escaped so a user searching for "50%" or "a_b" gets a
+        literal match rather than wildcard behaviour.
+        """
+        term = query.strip()
+        if not term:
+            return []
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} "
+                "WHERE owner_id = ? AND deleted_at IS NULL "
+                "AND name LIKE ? ESCAPE '\\' "
+                "ORDER BY is_directory DESC, name COLLATE NOCASE "
+                "LIMIT ?",
+                (owner_id, pattern, limit),
+            )
+            rows = await cursor.fetchall()
+            return [_row_to_file(row) for row in rows]
+
     async def bytes_used(self, owner_id: int) -> int:
         async with self._connect() as db:
             cursor = await db.execute(

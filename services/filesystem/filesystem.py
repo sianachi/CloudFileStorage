@@ -47,6 +47,9 @@ class Filesystem:
     async def list_children(self, owner_id: int, parent_path: str):
         return await self._processor.list_children(owner_id, parent_path)
 
+    async def search(self, owner_id: int, query: str, limit: int = 100):
+        return await self._processor.search(owner_id, query, limit)
+
     async def rename(self, owner_id: int, old_path: str, new_name: str):
         return await self._processor.rename(owner_id, old_path, new_name)
 
