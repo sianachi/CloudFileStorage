@@ -1,4 +1,4 @@
-import { apiJson, ApiRequestError, notifyUnauthorized } from './client'
+import { apiJson } from './client'
 import { apiUrl } from './baseUrl'
 
 export type ViewToken = {
@@ -23,10 +23,6 @@ export async function requestViewToken(
   path: string,
   authToken: string,
 ): Promise<ViewToken> {
-  void path
-  void authToken
-  void apiJson
-
   return apiJson<ViewToken>('/files/view-token', {
     method: 'POST',
     body: { path },
