@@ -11,3 +11,4 @@ class File:
     is_directory: bool = False
     # SHA-256 hex digest of the file's bytes; None for directories.
     checksum: str | None = None
+    is_favorite: bool = False

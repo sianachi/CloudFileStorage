@@ -68,6 +68,15 @@ class Filesystem:
     async def search(self, owner_id: int, query: str, limit: int = 100):
         return await self._processor.search(owner_id, query, limit)
 
+    async def set_favorite(self, owner_id: int, path: str, favorite: bool):
+        return await self._processor.set_favorite(owner_id, path, favorite)
+
+    async def list_favorites(self, owner_id: int):
+        return await self._processor.list_favorites(owner_id)
+
+    async def list_recent(self, owner_id: int, limit: int = 50):
+        return await self._processor.list_recent(owner_id, limit)
+
     async def rename(self, owner_id: int, old_path: str, new_name: str):
         return await self._processor.rename(owner_id, old_path, new_name)
 

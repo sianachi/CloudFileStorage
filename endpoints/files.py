@@ -27,6 +27,7 @@ from dto.dto import (
     EmptyTrashResponse,
     FileEntry,
     ListResponse,
+    FavoriteRequest,
     MoveRequest,
     QuotaResponse,
     RenameRequest,
@@ -110,6 +111,7 @@ def _to_entry(f: FileModel) -> FileEntry:
         is_directory=f.is_directory,
         last_updated=f.last_updated.isoformat() if isinstance(f.last_updated, datetime) else str(f.last_updated),
         checksum=f.checksum,
+        is_favorite=f.is_favorite,
     )
 
 
@@ -147,6 +149,38 @@ async def search_files(
 ) -> SearchResponse:
     results = await filesystem.search(user.id, q, limit)
     return SearchResponse(query=q, entries=[_to_entry(f) for f in results])
+
+
+@router.get("/files/favorites", response_model=ListResponse)
+async def list_favorites(
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> ListResponse:
+    favs = await filesystem.list_favorites(user.id)
+    return ListResponse(path="/favorites", entries=[_to_entry(f) for f in favs])
+
+
+@router.get("/files/recent", response_model=ListResponse)
+async def list_recent(
+    limit: int = Query(50, ge=1, le=200),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> ListResponse:
+    recent = await filesystem.list_recent(user.id, limit)
+    return ListResponse(path="/recent", entries=[_to_entry(f) for f in recent])
+
+
+@router.post("/files/favorite", response_model=FileEntry)
+async def set_favorite(
+    body: FavoriteRequest,
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> FileEntry:
+    normalized = _safe_user_path(body.path)
+    result = await filesystem.set_favorite(user.id, normalized, body.favorite)
+    if result is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return _to_entry(result)
 
 
 @router.post("/files", response_model=FileEntry)

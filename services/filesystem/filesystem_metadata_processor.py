@@ -86,6 +86,7 @@ def _row_to_file(row) -> File:
         if isinstance(row["last_updated"], str)
         else row["last_updated"],
         checksum=row["checksum"] if "checksum" in keys else None,
+        is_favorite=bool(row["is_favorite"]) if "is_favorite" in keys else False,
     )
 
 
@@ -380,6 +381,43 @@ class FilesystemMetadataProcessor(SQLiteService):
             )
             rows = await cursor.fetchall()
             return [_row_to_file(row) for row in rows]
+
+    async def set_favorite(
+        self, owner_id: int, path: str, favorite: bool
+    ) -> File | None:
+        normalized = normalize_path(path)
+        existing = await self.get_file(owner_id, normalized)
+        if existing is None:
+            return None
+        async with self._connect() as db:
+            await db.execute(
+                f"UPDATE {self.TABLE_NAME} SET is_favorite = ? "
+                "WHERE owner_id = ? AND path = ?",
+                (int(favorite), owner_id, normalized),
+            )
+            await db.commit()
+        return await self.get_file(owner_id, normalized)
+
+    async def list_favorites(self, owner_id: int) -> list[File]:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} "
+                "WHERE owner_id = ? AND is_favorite = 1 AND deleted_at IS NULL "
+                "ORDER BY is_directory DESC, name COLLATE NOCASE",
+                (owner_id,),
+            )
+            return [_row_to_file(r) for r in await cursor.fetchall()]
+
+    async def list_recent(self, owner_id: int, limit: int = 50) -> list[File]:
+        """Recently modified files (not folders), newest first."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} "
+                "WHERE owner_id = ? AND is_directory = 0 AND deleted_at IS NULL "
+                "ORDER BY last_updated DESC LIMIT ?",
+                (owner_id, limit),
+            )
+            return [_row_to_file(r) for r in await cursor.fetchall()]
 
     async def bytes_used(self, owner_id: int) -> int:
         async with self._connect() as db:

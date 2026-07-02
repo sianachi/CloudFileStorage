@@ -97,4 +97,12 @@ METADATA_MIGRATIONS: list[Migration] = [
             "ON shares (owner_id)",
         ],
     ),
+    # v5: favorites flag for quick access.
+    Migration(
+        version=5,
+        name="add_is_favorite",
+        statements=[
+            "ALTER TABLE metadata ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
+        ],
+    ),
 ]

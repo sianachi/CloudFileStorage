@@ -11,6 +11,7 @@ class FileEntry(BaseModel):
     is_directory: bool
     last_updated: str
     checksum: str | None = None
+    is_favorite: bool = False
 
 
 class VerifyResponse(BaseModel):
@@ -42,6 +43,11 @@ class RenameRequest(BaseModel):
 class MoveRequest(BaseModel):
     source: str = Field(..., min_length=1)
     destination_parent: str = Field(..., min_length=1)
+
+
+class FavoriteRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    favorite: bool
 
 
 class QuotaResponse(BaseModel):
