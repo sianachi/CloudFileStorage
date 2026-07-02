@@ -116,3 +116,20 @@ class ZipListingResponse(BaseModel):
 
 class SaveContentRequest(BaseModel):
     content: str
+
+
+class TrashEntry(BaseModel):
+    name: str
+    trash_path: str  # current path within the hidden trash namespace
+    original_path: str  # where it will be restored to
+    size: int
+    is_directory: bool
+    deleted_at: str  # ISO timestamp
+
+
+class TrashListResponse(BaseModel):
+    entries: list[TrashEntry]
+
+
+class EmptyTrashResponse(BaseModel):
+    purged: int

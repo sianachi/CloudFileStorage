@@ -27,4 +27,18 @@ USERS_MIGRATIONS: list[Migration] = [
 
 
 # --- file metadata database ----------------------------------------------
-METADATA_MIGRATIONS: list[Migration] = []
+METADATA_MIGRATIONS: list[Migration] = [
+    # v1: soft-delete / trash. Deleted entries are relocated into a hidden
+    # /.trash/{id} namespace with the original location recorded so they can
+    # be restored. deleted_at doubles as the "is trashed" flag.
+    Migration(
+        version=1,
+        name="add_trash_columns",
+        statements=[
+            "ALTER TABLE metadata ADD COLUMN deleted_at TEXT",
+            "ALTER TABLE metadata ADD COLUMN original_path TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_metadata_deleted "
+            "ON metadata (owner_id, deleted_at)",
+        ],
+    ),
+]

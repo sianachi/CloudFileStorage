@@ -16,11 +16,14 @@ from dependencies import get_current_user, get_filesystem
 from dto.dto import (
     CreateFolderRequest,
     DeleteResponse,
+    EmptyTrashResponse,
     FileEntry,
     ListResponse,
     QuotaResponse,
     RenameRequest,
     SaveContentRequest,
+    TrashEntry,
+    TrashListResponse,
     ViewTokenRequest,
     ViewTokenResponse,
     ZipEntry,
@@ -430,12 +433,90 @@ async def delete_entry(
     filesystem: Filesystem = Depends(get_filesystem),
     user: User = Depends(get_current_user),
 ) -> DeleteResponse:
+    """Soft-delete: move the entry to the user's trash. Recoverable via the
+    /trash endpoints until purged."""
     normalized = _safe_user_path(path)
     target = await filesystem.get_file(user.id, normalized)
     if target is None:
         raise HTTPException(status_code=404, detail="not found")
-    await filesystem.remove_file(target, user.id)
-    return DeleteResponse(success=True, message="deleted")
+    await filesystem.soft_delete(target, user.id)
+    return DeleteResponse(success=True, message="moved to trash")
+
+
+def _safe_trash_path(raw: str) -> str:
+    """Validate a trash path: it must live under the /.trash namespace so a
+    caller can't aim restore/purge at arbitrary active content."""
+    normalized = normalize_path(raw)
+    if not (normalized == "/.trash" or normalized.startswith("/.trash/")):
+        raise HTTPException(status_code=400, detail="invalid trash path")
+    if "\x00" in normalized:
+        raise HTTPException(status_code=400, detail="invalid trash path")
+    return normalized
+
+
+@router.get("/trash", response_model=TrashListResponse)
+async def list_trash(
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> TrashListResponse:
+    rows = await filesystem.list_trash(user.id)
+    entries = [
+        TrashEntry(
+            name=r["name"],
+            trash_path=r["path"],
+            original_path=r["original_path"],
+            size=r["size"],
+            is_directory=bool(r["is_directory"]),
+            deleted_at=r["deleted_at"],
+        )
+        for r in rows
+    ]
+    return TrashListResponse(entries=entries)
+
+
+@router.post("/trash/restore", response_model=FileEntry)
+async def restore_from_trash(
+    path: str = Query(..., description="trash_path of the entry to restore"),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> FileEntry:
+    trash_path = _safe_trash_path(path)
+    try:
+        restored = await filesystem.restore(user.id, trash_path)
+    except FileExistsError:
+        raise HTTPException(
+            status_code=409,
+            detail="something already exists at the original location",
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=409, detail="the original parent folder no longer exists"
+        )
+    if restored is None:
+        raise HTTPException(status_code=404, detail="trash entry not found")
+    return _to_entry(restored)
+
+
+@router.delete("/trash", response_model=DeleteResponse)
+async def purge_from_trash(
+    path: str = Query(..., description="trash_path of the entry to purge"),
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> DeleteResponse:
+    trash_path = _safe_trash_path(path)
+    purged = await filesystem.purge(user.id, trash_path)
+    if not purged:
+        raise HTTPException(status_code=404, detail="trash entry not found")
+    return DeleteResponse(success=True, message="permanently deleted")
+
+
+@router.delete("/trash/all", response_model=EmptyTrashResponse)
+async def empty_trash(
+    filesystem: Filesystem = Depends(get_filesystem),
+    user: User = Depends(get_current_user),
+) -> EmptyTrashResponse:
+    count = await filesystem.empty_trash(user.id)
+    return EmptyTrashResponse(purged=count)
 
 
 @router.post("/folders", response_model=FileEntry)

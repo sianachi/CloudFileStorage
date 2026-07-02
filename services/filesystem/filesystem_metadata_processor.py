@@ -1,7 +1,14 @@
 import os
+import secrets
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from const import Constants
+
+# Trashed entries are relocated under this synthetic prefix. It is never a
+# real metadata row and never a valid user path (see _safe_user_path, which
+# rejects the leading-dot ".." but this uses a full "/.trash/<id>" segment
+# that the app itself controls), so it can't collide with user content.
+TRASH_PREFIX = "/.trash"
 
 from models.file import File
 from services.migrations import apply_migrations
@@ -114,13 +121,15 @@ class FilesystemMetadataProcessor(SQLiteService):
             with open(disk_path, "wb") as f:
                 f.write(raw_bytes)
 
-    async def get_file(self, owner_id: int, path: str) -> File | None:
+    async def get_file(
+        self, owner_id: int, path: str, include_deleted: bool = False
+    ) -> File | None:
         normalized = normalize_path(path)
+        query = f"SELECT * FROM {self.TABLE_NAME} WHERE owner_id = ? AND path = ?"
+        if not include_deleted:
+            query += " AND deleted_at IS NULL"
         async with self._connect() as db:
-            cursor = await db.execute(
-                f"SELECT * FROM {self.TABLE_NAME} WHERE owner_id = ? AND path = ?",
-                (owner_id, normalized),
-            )
+            cursor = await db.execute(query, (owner_id, normalized))
             row = await cursor.fetchone()
             if row is None:
                 return None
@@ -240,7 +249,7 @@ class FilesystemMetadataProcessor(SQLiteService):
         async with self._connect() as db:
             cursor = await db.execute(
                 f"SELECT * FROM {self.TABLE_NAME} "
-                "WHERE owner_id = ? AND parent_path = ? "
+                "WHERE owner_id = ? AND parent_path = ? AND deleted_at IS NULL "
                 "ORDER BY is_directory DESC, name COLLATE NOCASE",
                 (owner_id, normalized),
             )
@@ -251,11 +260,171 @@ class FilesystemMetadataProcessor(SQLiteService):
         async with self._connect() as db:
             cursor = await db.execute(
                 f"SELECT COALESCE(SUM(size), 0) AS total FROM {self.TABLE_NAME} "
-                "WHERE owner_id = ? AND is_directory = 0",
+                "WHERE owner_id = ? AND is_directory = 0 AND deleted_at IS NULL",
                 (owner_id,),
             )
             row = await cursor.fetchone()
             return int(row["total"]) if row else 0
+
+    async def _relocate_subtree(
+        self, db, owner_id: int, old_path: str, new_path: str, is_directory: bool
+    ) -> None:
+        """Move an entry (and, for a folder, all descendants) from old_path to
+        new_path within the metadata table, then move its bytes on disk.
+
+        Shared by rename (leaf name change), move (new parent), trash, and
+        restore — all of which are prefix rewrites on the subtree.
+        """
+        new_name = new_path.rsplit("/", 1)[-1]
+        new_parent = parent_of(new_path)
+        await db.execute(
+            f"UPDATE {self.TABLE_NAME} SET path = ?, name = ?, parent_path = ? "
+            "WHERE owner_id = ? AND path = ?",
+            (new_path, new_name, new_parent, owner_id, old_path),
+        )
+        if is_directory:
+            old_prefix_len = len(old_path)
+            await db.execute(
+                f"UPDATE {self.TABLE_NAME} SET "
+                "path = ? || SUBSTR(path, ?), "
+                "parent_path = ? || SUBSTR(parent_path, ?) "
+                "WHERE owner_id = ? AND path LIKE ?",
+                (
+                    new_path,
+                    old_prefix_len + 1,
+                    new_path,
+                    old_prefix_len + 1,
+                    owner_id,
+                    old_path + "/%",
+                ),
+            )
+        old_disk = self._disk_path(owner_id, old_path)
+        new_disk = self._disk_path(owner_id, new_path)
+        if os.path.exists(old_disk):
+            os.makedirs(os.path.dirname(new_disk), exist_ok=True)
+            os.rename(old_disk, new_disk)
+
+    async def soft_delete(self, file: File, owner_id: int) -> None:
+        """Move an entry into the user's trash instead of destroying it.
+
+        The subtree is relocated under /.trash/{id}, deleted_at is stamped on
+        every affected row (so it drops out of listings and quota), and the
+        original location is recorded on the root for restore.
+        """
+        original = normalize_path(file.path)
+        trash_id = secrets.token_hex(8)
+        trash_root = f"{TRASH_PREFIX}/{trash_id}"
+        new_path = f"{trash_root}/{file.name}"
+        now = datetime.now(timezone.utc).isoformat()
+
+        async with self._connect() as db:
+            await self._relocate_subtree(
+                db, owner_id, original, new_path, file.is_directory
+            )
+            # Stamp the whole moved subtree as deleted.
+            await db.execute(
+                f"UPDATE {self.TABLE_NAME} SET deleted_at = ? "
+                "WHERE owner_id = ? AND (path = ? OR path LIKE ?)",
+                (now, owner_id, new_path, f"{new_path}/%"),
+            )
+            # Record where it came from — only on the root of the trashed tree.
+            await db.execute(
+                f"UPDATE {self.TABLE_NAME} SET original_path = ? "
+                "WHERE owner_id = ? AND path = ?",
+                (original, owner_id, new_path),
+            )
+            await db.commit()
+
+    async def list_trash(self, owner_id: int) -> list[dict]:
+        """The roots of each trashed subtree (not their descendants)."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} "
+                "WHERE owner_id = ? AND deleted_at IS NOT NULL "
+                "AND original_path IS NOT NULL "
+                "ORDER BY deleted_at DESC",
+                (owner_id,),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def _trash_root(self, owner_id: int, trash_path: str) -> dict | None:
+        normalized = normalize_path(trash_path)
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT * FROM {self.TABLE_NAME} "
+                "WHERE owner_id = ? AND path = ? AND deleted_at IS NOT NULL "
+                "AND original_path IS NOT NULL",
+                (owner_id, normalized),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row is not None else None
+
+    async def restore(self, owner_id: int, trash_path: str) -> File | None:
+        """Move a trashed entry back to its original location.
+
+        Returns the restored File, None if the trash entry doesn't exist, or
+        raises FileExistsError / FileNotFoundError if the destination is taken
+        or its parent folder no longer exists.
+        """
+        root = await self._trash_root(owner_id, trash_path)
+        if root is None:
+            return None
+
+        target = normalize_path(root["original_path"])
+        is_directory = bool(root["is_directory"])
+
+        # Destination must be free and its parent must still exist.
+        if await self.get_file(owner_id, target) is not None:
+            raise FileExistsError(target)
+        parent = parent_of(target)
+        if parent not in ("", "/"):
+            parent_row = await self.get_file(owner_id, parent)
+            if parent_row is None or not parent_row.is_directory:
+                raise FileNotFoundError(parent)
+
+        async with self._connect() as db:
+            await self._relocate_subtree(
+                db, owner_id, normalize_path(trash_path), target, is_directory
+            )
+            await db.execute(
+                f"UPDATE {self.TABLE_NAME} SET deleted_at = NULL, original_path = NULL "
+                "WHERE owner_id = ? AND (path = ? OR path LIKE ?)",
+                (owner_id, target, f"{target}/%"),
+            )
+            await db.commit()
+        return await self.get_file(owner_id, target)
+
+    async def purge(self, owner_id: int, trash_path: str) -> bool:
+        """Permanently delete a single trashed entry and its bytes."""
+        root = await self._trash_root(owner_id, trash_path)
+        if root is None:
+            return False
+        normalized = normalize_path(trash_path)
+        async with self._connect() as db:
+            await db.execute(
+                f"DELETE FROM {self.TABLE_NAME} "
+                "WHERE owner_id = ? AND (path = ? OR path LIKE ?)",
+                (owner_id, normalized, f"{normalized}/%"),
+            )
+            await db.commit()
+        disk_path = self._disk_path(owner_id, normalized)
+        if bool(root["is_directory"]):
+            shutil.rmtree(disk_path, ignore_errors=True)
+        else:
+            try:
+                os.remove(disk_path)
+            except FileNotFoundError:
+                pass
+        return True
+
+    async def empty_trash(self, owner_id: int) -> int:
+        """Permanently delete every trashed entry for the user. Returns the
+        number of trash roots removed."""
+        roots = await self.list_trash(owner_id)
+        for root in roots:
+            await self.purge(owner_id, root["path"])
+        return len(roots)
 
     def resolve_disk_path(self, owner_id: int, path: str) -> str:
         """Public accessor for the on-disk path; used by download streaming."""

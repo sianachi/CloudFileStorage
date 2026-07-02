@@ -26,6 +26,21 @@ class Filesystem:
     async def remove_file(self, file: File, owner_id: int):
         await self._processor.remove_file(file, owner_id)
 
+    async def soft_delete(self, file: File, owner_id: int):
+        await self._processor.soft_delete(file, owner_id)
+
+    async def list_trash(self, owner_id: int):
+        return await self._processor.list_trash(owner_id)
+
+    async def restore(self, owner_id: int, trash_path: str):
+        return await self._processor.restore(owner_id, trash_path)
+
+    async def purge(self, owner_id: int, trash_path: str):
+        return await self._processor.purge(owner_id, trash_path)
+
+    async def empty_trash(self, owner_id: int):
+        return await self._processor.empty_trash(owner_id)
+
     async def update_file(self, file: File, owner_id: int):
         await self._processor.update_file(file, owner_id)
 
