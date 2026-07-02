@@ -1,5 +1,7 @@
 """FastAPI dependency callables; keep thin to avoid circular imports with `main`."""
 
+import os
+
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -24,20 +26,34 @@ def get_login_guard(request: Request) -> LoginRateGuard:
     return request.app.state.login_guard
 
 
-def client_ip(request: Request) -> str:
-    """Best-effort client IP, trusting the first X-Forwarded-For hop.
+def _trusted_proxies() -> set[str]:
+    """Peer IPs whose X-Forwarded-For header we trust (e.g. the k8s ingress).
 
-    Behind the k8s ingress the real client is in X-Forwarded-For; direct
-    connections fall back to the socket peer. Good enough for rate limiting;
-    do not use for anything security-critical since XFF is spoofable when
-    not behind a trusted proxy.
+    Configured via TRUSTED_PROXIES (comma-separated). Empty by default so the
+    safe behaviour — ignore XFF entirely — holds unless an operator opts in.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else "unknown"
+    raw = os.getenv("TRUSTED_PROXIES", "")
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def client_ip(request: Request) -> str:
+    """Client IP used for rate limiting.
+
+    X-Forwarded-For is client-controllable, so honoring it blindly would let an
+    attacker mint a fresh rate-limit bucket per forged IP. We therefore trust
+    XFF only when the immediate socket peer is a configured trusted proxy, and
+    even then take the right-most entry (the hop the trusted proxy itself
+    added) rather than the attacker-controlled left-most one. Otherwise we use
+    the unspoofable socket peer.
+    """
+    peer = request.client.host if request.client else "unknown"
+    if peer in _trusted_proxies():
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
+    return peer
 
 
 async def get_current_user(

@@ -1,9 +1,36 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
+from dependencies import client_ip
 from services.auth.rate_limiter import LoginRateGuard
 
 VALID_PASSWORD = "validPass1234"
+
+
+def _fake_request(peer: str, xff: str | None = None):
+    headers = {}
+    if xff is not None:
+        headers["x-forwarded-for"] = xff
+    return SimpleNamespace(
+        client=SimpleNamespace(host=peer),
+        headers=SimpleNamespace(get=lambda k, d=None: headers.get(k, d)),
+    )
+
+
+def test_client_ip_ignores_xff_from_untrusted_peer(monkeypatch):
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    req = _fake_request("203.0.113.9", xff="1.1.1.1")
+    # XFF is attacker-controllable from an untrusted peer → must be ignored.
+    assert client_ip(req) == "203.0.113.9"
+
+
+def test_client_ip_uses_rightmost_xff_from_trusted_proxy(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.1")
+    # Attacker prepends a fake hop; the trusted proxy appends the real one.
+    req = _fake_request("10.0.0.1", xff="9.9.9.9, 198.51.100.7")
+    assert client_ip(req) == "198.51.100.7"
 
 
 def test_guard_locks_after_threshold_and_recovers():
