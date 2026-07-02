@@ -19,6 +19,8 @@ from dto.dto import (
     TokenVerificationResult,
 )
 from models.auth.user import User
+from services.migrations import apply_migrations
+from services.schema import BASELINE_VERSION, USERS_MIGRATIONS
 from services.sqlite_service import SQLiteService
 
 
@@ -45,6 +47,9 @@ class AuthManagement(SQLiteService):
                 updated_at TEXT NOT NULL
             )
         """
+        )
+        await apply_migrations(
+            self._db_path, USERS_MIGRATIONS, baseline=BASELINE_VERSION
         )
 
     async def login(self, request: LoginUserRequest) -> LoginResponse:

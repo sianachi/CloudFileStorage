@@ -4,6 +4,8 @@ from datetime import datetime
 from const import Constants
 
 from models.file import File
+from services.migrations import apply_migrations
+from services.schema import BASELINE_VERSION, METADATA_MIGRATIONS
 from services.sqlite_service import SQLiteService
 
 
@@ -74,6 +76,9 @@ class FilesystemMetadataProcessor(SQLiteService):
                 PRIMARY KEY (owner_id, path)
             )
             """
+        )
+        await apply_migrations(
+            self._db_path, METADATA_MIGRATIONS, baseline=BASELINE_VERSION
         )
 
     def _disk_path(self, owner_id: int, path: str) -> str:
